@@ -100,10 +100,73 @@ export function validateExcelRow(
   for (const col of REQUIRED_EXCEL_COLUMNS) {
     const val = row[col];
     if (val === null || val === undefined || String(val).trim() === "") {
-      return { row: rowIndex, message: `Missing required field: ${col}` };
+      return {
+        row: rowIndex,
+        message: `Missing required field: ${col}`,
+        mCode: row.M_Code != null ? String(row.M_Code) : undefined,
+        plotNo: row.Plot_No != null ? String(row.Plot_No) : undefined,
+      };
     }
   }
+
+  const mCode = String(row.M_Code).trim();
+  const plotNo = String(row.Plot_No).trim();
+  const jlNo = String(row.Jl_No).trim();
+  const mauzaJlS = String(row.Mauza_JL_S).trim();
+
+  if (mCode.length > 50) {
+    return {
+      row: rowIndex,
+      message: "M_Code exceeds 50 characters",
+      mCode,
+      plotNo,
+    };
+  }
+
+  if (plotNo.length > 50) {
+    return {
+      row: rowIndex,
+      message: "Plot_No exceeds 50 characters",
+      mCode,
+      plotNo,
+    };
+  }
+
+  if (jlNo.length > 30) {
+    return {
+      row: rowIndex,
+      message: "Jl_No exceeds 30 characters",
+      mCode,
+      plotNo,
+    };
+  }
+
+  if (mauzaJlS.length > 100) {
+    return {
+      row: rowIndex,
+      message: "Mauza_JL_S exceeds 100 characters",
+      mCode,
+      plotNo,
+    };
+  }
+
+  if (row.M_Acres != null && String(row.M_Acres).trim() !== "") {
+    const acres = Number(row.M_Acres);
+    if (Number.isNaN(acres) || acres < 0) {
+      return {
+        row: rowIndex,
+        message: "Invalid M_Acres value",
+        mCode,
+        plotNo,
+      };
+    }
+  }
+
   return null;
+}
+
+export function buildRecordKey(mCode: string, plotNo: string | null): string {
+  return plotNo ? `${mCode}::${plotNo}` : mCode;
 }
 
 export function excelRowToDbValues(row: ExcelRow) {
@@ -129,6 +192,52 @@ export function excelRowToDbValues(row: ExcelRow) {
     mauzaJlS: toString(row.Mauza_JL_S)!,
     shapeLeng: toNumericString(row.Shape_Leng),
     shapeArea: toNumericString(row.Shape_Area),
+  };
+}
+
+export function dbfAttributesToDbValues(attrs: Record<string, unknown>) {
+  const normalized = new Map<string, unknown>();
+  for (const [k, v] of Object.entries(attrs)) {
+    normalized.set(normalizeDbfFieldName(k), v);
+  }
+
+  const get = (...keys: string[]) => {
+    for (const key of keys) {
+      const val = normalized.get(key);
+      if (val !== null && val !== undefined && String(val).trim() !== "") {
+        return String(val).trim();
+      }
+    }
+    return null;
+  };
+
+  const mCode = get("M_CODE", "MCODE", "M_CODE_1") ?? "UNKNOWN";
+  const mauza = get("MAUZA", "MOUZA", "MAUZA_NM") ?? mCode;
+  const jlNo = get("JL_NO", "JLNO", "JL_NUMBER") ?? "0";
+  const mauzaJlS = get("MAUZA_JL_S", "MAUZA_JLS", "MAUZA_JL") ?? `${mauza}_${jlNo}`;
+
+  return {
+    plotNo: get("PLOT_NO", "PLOTNO", "PLOT_NUMBER", "DAG_NO"),
+    mauza,
+    jlNo,
+    sheetNo: get("SHEET_NO"),
+    scale: get("SCALE"),
+    revenueNo: get("REVENUE_NO"),
+    project: get("PROJECT"),
+    mzVer: get("MZ_VER"),
+    mCode,
+    layerCode: get("LAYER_CODE"),
+    layer: get("LAYER"),
+    mDistrict: get("M_DISTRICT", "DISTRICT"),
+    mUpazila: get("M_UPAZILA", "UPAZILA", "THANA"),
+    prepDate: toDateString(normalized.get("PREP_DATE")),
+    mAcres: toNumericString(normalized.get("M_ACRES")),
+    landType: get("LAND_TYPE"),
+    khasArea: toNumericString(normalized.get("KHAS_AREA")),
+    landClass: get("LAND_CLASS"),
+    mauzaJlS,
+    shapeLeng: toNumericString(normalized.get("SHAPE_LENG")),
+    shapeArea: toNumericString(normalized.get("SHAPE_AREA")),
   };
 }
 

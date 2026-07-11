@@ -10,9 +10,10 @@ import { writeAuditLog } from "@/lib/audit/log";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const limit = Number(searchParams.get("limit") ?? "100");
+  const limit = Number(searchParams.get("limit") ?? "500");
+  const datasetId = searchParams.get("datasetId") ?? undefined;
 
-  const rows = await listMouzaRegistry(limit);
+  const rows = await listMouzaRegistry(limit, datasetId);
   return NextResponse.json({ mouzas: rows });
 }
 

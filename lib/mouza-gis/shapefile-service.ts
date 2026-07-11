@@ -10,6 +10,7 @@ import {
   extractDbfMatchKeys,
   normalizeDbfFieldName,
 } from "./excel-import";
+import { resolveSourceEpsg } from "./projection";
 
 export type ParsedFeature = {
   attributes: Record<string, unknown>;
@@ -23,6 +24,8 @@ export type ShapefileParseResult = {
   geojson: FeatureCollection;
   baseName: string;
   hasGeometry: boolean;
+  sourceEpsg?: number;
+  prj?: string;
 };
 
 export type ExtractedShapefile = {
@@ -153,7 +156,7 @@ async function readDbfBuffer(dbfBuffer: Buffer): Promise<ShapefileParseResult> {
   };
 }
 
-async function readShapefilePair(
+export async function readShapefilePair(
   shpBuffer: Buffer,
   dbfBuffer: Buffer,
 ): Promise<ShapefileParseResult> {
@@ -238,9 +241,12 @@ export async function parseShapefileZip(
   }
 
   const parsed = await readShapefilePair(extracted.data.shp, extracted.data.dbf);
+  const sampleGeometry = parsed.features.find((f) => f.geometry)?.geometry ?? null;
   return {
     ...parsed,
     baseName: extracted.data.baseName,
+    prj: extracted.data.prj,
+    sourceEpsg: resolveSourceEpsg(sampleGeometry, extracted.data.prj),
   };
 }
 

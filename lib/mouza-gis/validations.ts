@@ -84,6 +84,37 @@ export type ExcelRow = {
 export type ImportRowError = {
   row: number;
   message: string;
+  mCode?: string;
+  plotNo?: string;
+};
+
+export type SyncRecordReport = {
+  recordId?: string;
+  mCode: string;
+  plotNo: string | null;
+  mauza?: string;
+  status:
+    | "synced"
+    | "updated"
+    | "skipped"
+    | "failed"
+    | "geometry_missing"
+    | "duplicate_geometry"
+    | "unmatched";
+  reason?: string;
+};
+
+export type SynchronizeReport = {
+  synced: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  geometryMissing: number;
+  duplicateGeometries: number;
+  unmatchedRecords: number;
+  unmatchedFeatures: number;
+  records: SyncRecordReport[];
+  errors: string[];
 };
 
 export type ImportResult = {
@@ -93,4 +124,7 @@ export type ImportResult = {
   errors: ImportRowError[];
   updated: number;
   inserted: number;
+  skipped: number;
+  failed: number;
+  sync: SynchronizeReport | null;
 };

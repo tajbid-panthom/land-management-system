@@ -16,6 +16,7 @@ export function UserNav({
     <div className="flex items-center gap-3">
       <Link
         href="/dashboard/profile"
+        prefetch={false}
         className="hidden max-w-40 truncate text-slate-600 transition hover:text-teal-700 sm:inline"
         title={displayName}
       >
@@ -23,6 +24,7 @@ export function UserNav({
       </Link>
       <Link
         href="/dashboard/profile"
+        prefetch={false}
         className="rounded-full border border-sky-200 px-3 py-1.5 text-slate-700 transition hover:bg-sky-50 hover:text-teal-700"
       >
         Profile

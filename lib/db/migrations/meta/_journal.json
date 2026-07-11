@@ -50,6 +50,27 @@
       "when": 1783606000000,
       "tag": "0007_shapefile_geojson",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783607000000,
+      "tag": "0008_gis_maps",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1783608000000,
+      "tag": "0009_mouza_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783769879950,
+      "tag": "0010_melted_zodiak",
+      "breakpoints": true
     }
   ]
 }

@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { isPropertyAdmin } from "@/lib/auth/rbac";
-import { uploadToCloudinary } from "@/lib/storage/cloudinary";
+import { storeMouzaGisFile } from "@/lib/mouza-gis/storage";
+import { ensureDatasetForUpload } from "@/lib/mouza-gis/dataset-service";
 import { parseGisFile, parseLegacyShapefileUpload } from "@/lib/mouza-gis/shapefile-service";
-import { insertFeaturesFromParsed } from "@/lib/mouza-gis/mapping";
+import { insertFeaturesFromParsed, rebuildRecordsFromFeatures } from "@/lib/mouza-gis/mapping";
+import { fixWrongUtmZoneGeometries } from "@/lib/mouza-gis/reproject";
+import { synchronizeDataset } from "@/lib/mouza-gis/sync-service";
 import { getDatasetById } from "@/lib/mouza-gis/queries";
 import { db } from "@/lib/db";
 import { mouzaDbfFiles, mouzaGisFeatures } from "@/lib/db/schema";
@@ -22,7 +25,7 @@ export async function POST(request: NextRequest) {
   }
 
   const formData = await request.formData();
-  const datasetId = formData.get("datasetId") as string | null;
+  const datasetIdParam = formData.get("datasetId") as string | null;
   const uploadFile =
     (formData.get("dbf") as File | null) ??
     (formData.get("zip") as File | null) ??
@@ -30,23 +33,15 @@ export async function POST(request: NextRequest) {
     (formData.get("file") as File | null);
   const shpFile = formData.get("shp") as File | null;
 
-  if (!datasetId) {
-    return NextResponse.json({ error: "datasetId is required" }, { status: 400 });
-  }
-
   if (!uploadFile) {
     return NextResponse.json(
-      { error: "Upload a .dbf file or a .zip containing shapefile/DBF data" },
+      { error: "Upload a .zip shapefile archive" },
       { status: 400 },
     );
   }
 
-  const dataset = await getDatasetById(datasetId);
-  if (!dataset) {
-    return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
-  }
-
   try {
+    const started = Date.now();
     const archiveBuffer = Buffer.from(await uploadFile.arrayBuffer());
     const archiveName = uploadFile.name;
     const ext = getExtension(archiveName);
@@ -63,32 +58,49 @@ export async function POST(request: NextRequest) {
       });
     } else {
       return NextResponse.json(
-        { error: "Upload a .dbf or .zip file" },
+        { error: "Upload a .zip shapefile archive" },
         { status: 400 },
       );
     }
 
     if (parsed.features.length === 0) {
       return NextResponse.json(
-        { error: "DBF file contains no records" },
+        { error: "Shapefile contains no records" },
         { status: 400 },
       );
     }
 
+    console.info(
+      `[mouza-gis/dbf] parsed ${parsed.features.length} features in ${Date.now() - started}ms`,
+    );
+
+    const dataset = await ensureDatasetForUpload({
+      datasetId: datasetIdParam,
+      fileName: archiveName,
+      features: parsed.features,
+    });
+    const datasetId = dataset.id;
+    const datasetInfo = await getDatasetById(datasetId);
+    if (!datasetInfo) {
+      return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
+    }
+
     const timestamp = Date.now();
-    const archiveUpload = await uploadToCloudinary(archiveBuffer, {
-      folder: `mouza-gis/${dataset.slug}/archives`,
-      resourceType: "raw",
-      publicId: `${ext === "dbf" ? "dbf" : "shapefile"}-v${timestamp}`,
+    const archiveUpload = await storeMouzaGisFile(archiveBuffer, {
+      datasetId,
+      folder: "archives",
+      fileName: archiveName,
+      publicIdBase: `${ext === "dbf" ? "dbf" : "shapefile"}-v${timestamp}`,
     });
 
-    let geojsonUpload: Awaited<ReturnType<typeof uploadToCloudinary>> | null = null;
+    let geojsonUpload: Awaited<ReturnType<typeof storeMouzaGisFile>> | null = null;
     if (parsed.hasGeometry && parsed.geojson.features.length > 0) {
       const geojsonBuffer = Buffer.from(JSON.stringify(parsed.geojson), "utf-8");
-      geojsonUpload = await uploadToCloudinary(geojsonBuffer, {
-        folder: `mouza-gis/${dataset.slug}/geojson`,
-        resourceType: "raw",
-        publicId: `geojson-v${timestamp}`,
+      geojsonUpload = await storeMouzaGisFile(geojsonBuffer, {
+        datasetId,
+        folder: "geojson",
+        fileName: `geojson-v${timestamp}.json`,
+        publicIdBase: `geojson-v${timestamp}`,
       });
     }
 
@@ -135,11 +147,38 @@ export async function POST(request: NextRequest) {
       })
       .returning();
 
+    const sourceEpsg = parsed.sourceEpsg ?? 4326;
     const featureCount = await insertFeaturesFromParsed(
       datasetId,
       fileRecord.id,
       parsed.features,
+      sourceEpsg,
     );
+    console.info(
+      `[mouza-gis/dbf] inserted ${featureCount} features (EPSG:${sourceEpsg}) in ${Date.now() - started}ms`,
+    );
+
+    if (parsed.hasGeometry) {
+      const repaired = await fixWrongUtmZoneGeometries(datasetId);
+      if (repaired.featureCount > 0 || repaired.parcelCount > 0) {
+        console.info(
+          `[mouza-gis/dbf] repaired UTM zone geometries: ${repaired.featureCount} features, ${repaired.parcelCount} parcels`,
+        );
+      }
+    }
+
+    const recordCount = await rebuildRecordsFromFeatures(datasetId);
+    console.info(`[mouza-gis/dbf] rebuilt ${recordCount} records in ${Date.now() - started}ms`);
+
+    let sync = null;
+    try {
+      sync = await synchronizeDataset(datasetId);
+      console.info(
+        `[mouza-gis/dbf] sync complete: ${sync.synced} synced, ${sync.failed} failed in ${Date.now() - started}ms`,
+      );
+    } catch (syncErr) {
+      console.error("[mouza-gis/dbf] auto-sync failed", syncErr);
+    }
 
     await writeAuditLog({
       actorUserId: session.user.id,
@@ -157,16 +196,25 @@ export async function POST(request: NextRequest) {
         request.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
     });
 
+    const storageNote =
+      archiveUpload.storage === "local"
+        ? " Archive stored locally (exceeds Cloudinary 20 MB limit)."
+        : "";
+
     return NextResponse.json({
+      dataset: { id: datasetId, name: datasetInfo.name, created: dataset.created },
       file: fileRecord,
       dbfFile: fileRecord,
       featureCount,
+      recordCount,
       hasGeometry: parsed.hasGeometry,
       geojsonUrl: geojsonUpload?.secureUrl ?? null,
+      storage: archiveUpload.storage,
+      sync,
       matchKeys: ["M_Code + Plot_No", "Mauza_JL_S + Plot_No"],
       message: parsed.hasGeometry
-        ? "Shapefile processed with geometry."
-        : "DBF attributes imported. Map boundaries unavailable until a .shp is provided. Run mapping to join with Excel data.",
+        ? `Shapefile uploaded: ${featureCount} plots mapped, ${recordCount} records synced to registry.${storageNote}`
+        : `Shapefile uploaded without geometry. Upload a .zip with .shp, .shx, .dbf, and .prj for map boundaries.${storageNote}`,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "GIS upload failed";

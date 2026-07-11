@@ -13,6 +13,7 @@ const adminLinks = [
   { href: "/dashboard/owners", label: "Owners" },
   { href: "/dashboard/deeds", label: "Registered Deeds" },
   { href: "/dashboard/mouza", label: "Mouza" },
+  { href: "/dashboard/maps", label: "GIS Maps" },
   { href: "/dashboard/khatian", label: "Khatian" },
   { href: "/dashboard/plots", label: "Plots" },
   { href: "/dashboard/documents", label: "Documents" },

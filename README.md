@@ -35,8 +35,8 @@ Ensure PostgreSQL has PostGIS available, then:
 # Apply PostGIS extension first
 psql $DATABASE_URL -f lib/db/migrations/0000_postgis_extension.sql
 
-# Push schema (or use db:generate + db:migrate)
-pnpm db:push
+# Generate and apply migrations from Drizzle schema
+pnpm db:sync
 
 # Seed sample geography, parcel, and staff users
 pnpm db:seed

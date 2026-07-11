@@ -9,6 +9,7 @@ export * from "./services";
 export * from "./auth";
 export * from "./properties";
 export * from "./mouza-gis";
+export * from "./gis-maps";
 
 import { relations } from "drizzle-orm";
 import { divisions, districts, upazilas, unions, mouzas } from "./geography";
@@ -35,6 +36,12 @@ import {
   mouzaDbfFiles,
   mouzaGisFeatures,
 } from "./mouza-gis";
+import {
+  gisMaps,
+  gisLayers,
+  gisLayerFeatures,
+  gisProcessingJobs,
+} from "./gis-maps";
 import {
   properties,
   propertyLocations,
@@ -346,6 +353,43 @@ export const mouzaGisRecordsRelations = relations(
     parcel: one(landParcels, {
       fields: [mouzaGisRecords.parcelId],
       references: [landParcels.id],
+    }),
+  }),
+);
+
+export const gisMapsRelations = relations(gisMaps, ({ one, many }) => ({
+  uploader: one(users, {
+    fields: [gisMaps.uploadedBy],
+    references: [users.id],
+  }),
+  layers: many(gisLayers),
+  jobs: many(gisProcessingJobs),
+}));
+
+export const gisLayersRelations = relations(gisLayers, ({ one, many }) => ({
+  map: one(gisMaps, {
+    fields: [gisLayers.mapId],
+    references: [gisMaps.id],
+  }),
+  features: many(gisLayerFeatures),
+}));
+
+export const gisLayerFeaturesRelations = relations(
+  gisLayerFeatures,
+  ({ one }) => ({
+    layer: one(gisLayers, {
+      fields: [gisLayerFeatures.layerId],
+      references: [gisLayers.id],
+    }),
+  }),
+);
+
+export const gisProcessingJobsRelations = relations(
+  gisProcessingJobs,
+  ({ one }) => ({
+    map: one(gisMaps, {
+      fields: [gisProcessingJobs.mapId],
+      references: [gisMaps.id],
     }),
   }),
 );

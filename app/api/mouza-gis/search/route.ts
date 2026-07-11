@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  findDhakaNorthDistrict,
-  listUpazilasForDhakaNorth,
+  listUpazilasForDataset,
   listMouzasForUpazilaName,
   listPlotsByMouzaFromGis,
   listPlotsByMouza,
   getMouzaGisDetail,
   getMouzaMapGeoJson,
+  searchMouzaRecords,
+  getSynchronizedDatasetGeoJson,
+  getMouzaRecordById,
+  getDatasetById,
 } from "@/lib/mouza-gis/queries";
 import { db } from "@/lib/db";
 import { districts, upazilas } from "@/lib/db/schema";
@@ -15,6 +18,7 @@ import { asc, eq } from "drizzle-orm";
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const level = searchParams.get("level") ?? "districts";
+  const datasetId = searchParams.get("datasetId");
   const districtId = searchParams.get("districtId");
   const upazilaId = searchParams.get("upazilaId");
   const upazilaName = searchParams.get("upazilaName");
@@ -24,24 +28,40 @@ export async function GET(request: NextRequest) {
 
   switch (level) {
     case "districts": {
-      const dhaka = await findDhakaNorthDistrict();
-      const items = dhaka
-        ? [{ id: dhaka.id, name: dhaka.name }]
-        : await db.select({ id: districts.id, name: districts.name }).from(districts).orderBy(asc(districts.name)).limit(20);
+      if (datasetId) {
+        const dataset = await getDatasetById(datasetId);
+        if (dataset?.districtId) {
+          const [district] = await db
+            .select({ id: districts.id, name: districts.name })
+            .from(districts)
+            .where(eq(districts.id, dataset.districtId))
+            .limit(1);
+          if (district) {
+            return NextResponse.json({ items: [district] });
+          }
+        }
+      }
+      const items = await db
+        .select({ id: districts.id, name: districts.name })
+        .from(districts)
+        .orderBy(asc(districts.name))
+        .limit(50);
       return NextResponse.json({ items });
     }
 
     case "upazilas": {
-      if (!districtId) {
-        return NextResponse.json({ error: "districtId required" }, { status: 400 });
+      if (datasetId) {
+        const fromGis = await listUpazilasForDataset(datasetId);
+        if (fromGis.length > 0) {
+          return NextResponse.json({
+            items: fromGis
+              .filter((u) => u.name)
+              .map((u) => ({ id: u.name!, name: u.name! })),
+          });
+        }
       }
-      const fromGis = await listUpazilasForDhakaNorth(districtId);
-      if (fromGis.length > 0) {
-        return NextResponse.json({
-          items: fromGis
-            .filter((u) => u.name)
-            .map((u) => ({ id: u.name!, name: u.name! })),
-        });
+      if (!districtId) {
+        return NextResponse.json({ error: "datasetId or districtId required" }, { status: 400 });
       }
       const items = await db
         .select({ id: upazilas.id, name: upazilas.name })
@@ -52,8 +72,8 @@ export async function GET(request: NextRequest) {
     }
 
     case "mouzas": {
-      if (upazilaName && districtId) {
-        const items = await listMouzasForUpazilaName(districtId, upazilaName);
+      if (datasetId && upazilaName) {
+        const items = await listMouzasForUpazilaName(datasetId, upazilaName);
         return NextResponse.json({
           items: items.map((m) => ({
             id: m.mouzaId ?? m.mCode,
@@ -68,7 +88,7 @@ export async function GET(request: NextRequest) {
         const items = await listMouzasByUpazila(upazilaId);
         return NextResponse.json({ items });
       }
-      return NextResponse.json({ error: "upazilaId or upazilaName required" }, { status: 400 });
+      return NextResponse.json({ error: "datasetId+upazilaName or upazilaId required" }, { status: 400 });
     }
 
     case "plots": {
@@ -107,6 +127,52 @@ export async function GET(request: NextRequest) {
       }
       const geojson = await getMouzaMapGeoJson(mouzaId, plotNo ?? undefined);
       return NextResponse.json(geojson);
+    }
+
+    case "search": {
+      const q = searchParams.get("q");
+      if (!q?.trim()) {
+        return NextResponse.json({ error: "q is required" }, { status: 400 });
+      }
+      const datasetId = searchParams.get("datasetId") ?? undefined;
+      const results = await searchMouzaRecords(q, {
+        datasetId,
+        district: searchParams.get("district") ?? undefined,
+        upazila: searchParams.get("upazila") ?? undefined,
+        mouza: searchParams.get("mouza") ?? undefined,
+        jlNo: searchParams.get("jlNo") ?? undefined,
+        mCode: searchParams.get("mCode") ?? undefined,
+        plotNo: searchParams.get("plotNo") ?? undefined,
+      });
+      return NextResponse.json({ results });
+    }
+
+    case "synced-geojson": {
+      const datasetId = searchParams.get("datasetId");
+      if (!datasetId) {
+        return NextResponse.json({ error: "datasetId required" }, { status: 400 });
+      }
+      const dataset = await getDatasetById(datasetId);
+      if (!dataset) {
+        return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
+      }
+      const geojson = await getSynchronizedDatasetGeoJson(datasetId);
+      return NextResponse.json(geojson);
+    }
+
+    case "record": {
+      const recordId = searchParams.get("recordId");
+      if (!recordId) {
+        return NextResponse.json({ error: "recordId required" }, { status: 400 });
+      }
+      const record = await getMouzaRecordById(recordId);
+      if (!record) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      const detail = record.mouzaId
+        ? await getMouzaGisDetail(record.mouzaId, record.plotNo ?? undefined)
+        : null;
+      return NextResponse.json({ record, detail });
     }
 
     default:

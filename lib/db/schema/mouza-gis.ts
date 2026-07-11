@@ -2,6 +2,7 @@ import {
   pgTable,
   uuid,
   varchar,
+  text,
   timestamp,
   numeric,
   integer,
@@ -13,7 +14,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { districts, upazilas, mouzas } from "./geography";
 import { landParcels } from "./parcels";
-import { polygonGeometry } from "./geometry";
+import { geometry } from "./geometry";
 import { users } from "./auth";
 
 export const mouzaGisDatasets = pgTable(
@@ -84,11 +85,14 @@ export const mouzaGisRecords = pgTable(
     parcelId: uuid("parcel_id").references(() => landParcels.id),
     featureId: uuid("feature_id"),
     mappedAt: timestamp("mapped_at"),
+    syncStatus: varchar("sync_status", { length: 40 }),
+    syncMessage: text("sync_message"),
     createdAt: timestamp("created_at").defaultNow(),
     updatedAt: timestamp("updated_at").defaultNow(),
   },
   (table) => [
     index("mouza_gis_records_dataset_idx").on(table.datasetId),
+    index("mouza_gis_records_sync_status_idx").on(table.syncStatus),
     index("mouza_gis_records_m_code_idx").on(table.mCode),
     index("mouza_gis_records_mauza_jl_s_idx").on(table.mauzaJlS),
     index("mouza_gis_records_jl_no_idx").on(table.jlNo),
@@ -149,7 +153,7 @@ export const mouzaGisFeatures = pgTable(
     plotNo: varchar("plot_no", { length: 50 }),
     mauza: varchar("mauza", { length: 150 }),
     dbfAttributes: jsonb("dbf_attributes").notNull(),
-    boundary: polygonGeometry("boundary"),
+    boundary: geometry("boundary"),
     gisRecordId: uuid("gis_record_id").references(() => mouzaGisRecords.id),
     mappedAt: timestamp("mapped_at"),
     createdAt: timestamp("created_at").defaultNow(),

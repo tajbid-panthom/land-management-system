@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSession } from "@/lib/auth/session";
 import { isPropertyAdmin } from "@/lib/auth/rbac";
 import { mapDatasetSchema } from "@/lib/mouza-gis/validations";
-import { mapDatasetRecords } from "@/lib/mouza-gis/mapping";
+import { synchronizeDataset } from "@/lib/mouza-gis/sync-service";
 import { writeAuditLog } from "@/lib/audit/log";
 
 export async function POST(request: NextRequest) {
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await mapDatasetRecords(parsed.data.datasetId);
+    const result = await synchronizeDataset(parsed.data.datasetId);
 
     await writeAuditLog({
       actorUserId: session.user.id,

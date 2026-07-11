@@ -1,8 +1,9 @@
-import { parseExcelBuffer, validateExcelRow, excelRowToDbValues } from "./excel-import";
+import { parseExcelBuffer, validateExcelRow, excelRowToDbValues, buildRecordKey } from "./excel-import";
 import { db } from "@/lib/db";
 import { mouzaGisImports, mouzaGisRecords } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import type { ImportResult } from "./validations";
+import { synchronizeDataset } from "./mapping";
 
 const BATCH_SIZE = 200;
 
@@ -11,7 +12,9 @@ export async function importExcelToDataset(
   buffer: Buffer,
   fileName: string,
   userId: string,
+  options?: { autoSync?: boolean },
 ): Promise<ImportResult> {
+  const autoSync = options?.autoSync !== false;
   const { rows, missingColumns } = parseExcelBuffer(buffer);
 
   if (missingColumns.length > 0) {
@@ -34,6 +37,9 @@ export async function importExcelToDataset(
   const errors: ImportResult["errors"] = [];
   let inserted = 0;
   let updated = 0;
+  let skipped = 0;
+  let failed = 0;
+  const seenKeys = new Map<string, number>();
 
   for (let i = 0; i < rows.length; i++) {
     const rowNum = i + 2;
@@ -41,10 +47,24 @@ export async function importExcelToDataset(
     const validationError = validateExcelRow(row, rowNum);
     if (validationError) {
       errors.push(validationError);
+      failed++;
       continue;
     }
 
     const values = excelRowToDbValues(row);
+    const recordKey = buildRecordKey(values.mCode, values.plotNo);
+
+    if (seenKeys.has(recordKey)) {
+      errors.push({
+        row: rowNum,
+        message: `Duplicate row in file (same M_Code + Plot_No as row ${seenKeys.get(recordKey)})`,
+        mCode: values.mCode,
+        plotNo: values.plotNo ?? undefined,
+      });
+      skipped++;
+      continue;
+    }
+    seenKeys.set(recordKey, rowNum);
 
     try {
       const duplicateConditions = [
@@ -55,43 +75,81 @@ export async function importExcelToDataset(
         duplicateConditions.push(eq(mouzaGisRecords.plotNo, values.plotNo));
       }
 
-      const existing = await db
-        .select({ id: mouzaGisRecords.id })
+      const [existing] = await db
+        .select({
+          id: mouzaGisRecords.id,
+          mouzaId: mouzaGisRecords.mouzaId,
+          parcelId: mouzaGisRecords.parcelId,
+          featureId: mouzaGisRecords.featureId,
+          mauza: mouzaGisRecords.mauza,
+          jlNo: mouzaGisRecords.jlNo,
+          mAcres: mouzaGisRecords.mAcres,
+          landType: mouzaGisRecords.landType,
+          landClass: mouzaGisRecords.landClass,
+        })
         .from(mouzaGisRecords)
         .where(and(...duplicateConditions))
         .limit(1);
 
-      if (existing[0]) {
+      if (existing) {
+        const unchanged =
+          existing.mauza === values.mauza &&
+          existing.jlNo === values.jlNo &&
+          existing.mAcres === values.mAcres &&
+          existing.landType === values.landType &&
+          existing.landClass === values.landClass;
+
+        if (unchanged) {
+          skipped++;
+          continue;
+        }
+
         await db
           .update(mouzaGisRecords)
           .set({
             ...values,
             importId: importRow.id,
             updatedAt: new Date(),
-            mappedAt: null,
-            mouzaId: null,
-            parcelId: null,
-            featureId: null,
+            syncStatus: "unmatched",
+            syncMessage: "Pending re-synchronization after update",
           })
-          .where(eq(mouzaGisRecords.id, existing[0].id));
+          .where(eq(mouzaGisRecords.id, existing.id));
         updated++;
       } else {
         await db.insert(mouzaGisRecords).values({
           datasetId,
           importId: importRow.id,
           ...values,
+          syncStatus: "unmatched",
+          syncMessage: "Pending synchronization",
         });
         inserted++;
       }
     } catch (err) {
+      failed++;
       errors.push({
         row: rowNum,
         message: err instanceof Error ? err.message : "Insert failed",
+        mCode: values.mCode,
+        plotNo: values.plotNo ?? undefined,
       });
     }
   }
 
   const success = inserted + updated;
+  let sync: ImportResult["sync"] = null;
+
+  if (autoSync && success > 0) {
+    try {
+      sync = await synchronizeDataset(datasetId);
+    } catch (err) {
+      errors.push({
+        row: 0,
+        message: `Auto-sync failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+      });
+    }
+  }
+
   await db
     .update(mouzaGisImports)
     .set({
@@ -109,5 +167,8 @@ export async function importExcelToDataset(
     errors,
     updated,
     inserted,
+    skipped,
+    failed,
+    sync,
   };
 }
