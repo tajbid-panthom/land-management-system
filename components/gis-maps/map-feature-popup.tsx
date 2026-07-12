@@ -8,12 +8,17 @@ import {
   useState,
   type RefObject,
 } from "react";
-import { MapPin } from "lucide-react";
+import Link from "next/link";
+import { ExternalLink, FileText, MapPin, Upload } from "lucide-react";
 import type { MapRef } from "react-map-gl/maplibre";
-import type { PopupSection } from "@/lib/gis-maps/feature-popup";
+import type {
+  PopupSection,
+  PropertyDocumentAction,
+} from "@/lib/gis-maps/feature-popup";
+import type { PropertyPopupLink } from "@/lib/gis-maps/property-links";
 
 const POPUP_WIDTH = 320;
-const POPUP_MAX_HEIGHT = 360;
+const POPUP_MAX_HEIGHT = 420;
 const POPUP_MARGIN = 12;
 const MARKER_SIZE = 36;
 const POPUP_GAP = 10;
@@ -28,8 +33,13 @@ type MapFeaturePopupProps = {
   anchor: { lng: number; lat: number } | null;
   title?: string;
   sections: PopupSection[];
+  documents?: PropertyDocumentAction[];
+  propertyLinks?: PropertyPopupLink[];
   loading?: boolean;
+  suppressEscape?: boolean;
   onClose: () => void;
+  onOpenDocument?: (action: PropertyDocumentAction) => void;
+  onPositionChange?: (position: OverlayPosition | null) => void;
   mapRef: RefObject<MapRef | null>;
 };
 
@@ -73,8 +83,13 @@ export function MapFeaturePopup({
   anchor,
   title,
   sections,
+  documents = [],
+  propertyLinks = [],
   loading = false,
+  suppressEscape = false,
   onClose,
+  onOpenDocument,
+  onPositionChange,
   mapRef,
 }: MapFeaturePopupProps) {
   const titleId = useId();
@@ -85,6 +100,7 @@ export function MapFeaturePopup({
   const updatePosition = useCallback(() => {
     if (!open || !anchor) {
       setPosition(null);
+      onPositionChange?.(null);
       return;
     }
 
@@ -96,19 +112,19 @@ export function MapFeaturePopup({
     const popupHeight =
       popupRef.current?.offsetHeight ?? POPUP_MAX_HEIGHT + 48;
 
-    setPosition(
-      computeOverlayPosition(
-        { x: projected.x, y: projected.y },
-        popupHeight,
-        container.clientWidth,
-        container.clientHeight,
-      ),
+    const next = computeOverlayPosition(
+      { x: projected.x, y: projected.y },
+      popupHeight,
+      container.clientWidth,
+      container.clientHeight,
     );
-  }, [anchor, mapRef, open]);
+    setPosition(next);
+    onPositionChange?.(next);
+  }, [anchor, mapRef, onPositionChange, open]);
 
   useEffect(() => {
     updatePosition();
-  }, [updatePosition, sections, loading]);
+  }, [updatePosition, sections, documents, propertyLinks, loading]);
 
   useEffect(() => {
     if (!open || !anchor) return;
@@ -129,7 +145,7 @@ export function MapFeaturePopup({
   }, [anchor, mapRef, open, updatePosition]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || suppressEscape) return;
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -140,7 +156,7 @@ export function MapFeaturePopup({
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open]);
+  }, [onClose, open, suppressEscape]);
 
   useEffect(() => {
     if (open) {
@@ -214,10 +230,12 @@ export function MapFeaturePopup({
           </button>
         </div>
 
-        <div className="max-h-[360px] overflow-y-auto px-4 py-3">
+        <div className="max-h-[420px] overflow-y-auto px-4 py-3">
           {loading ? (
             <p className="text-sm text-slate-500">Loading feature details...</p>
-          ) : sections.length === 0 ? (
+          ) : sections.length === 0 &&
+            documents.length === 0 &&
+            propertyLinks.length === 0 ? (
             <p className="text-sm text-slate-500">No details available.</p>
           ) : (
             <div className="space-y-4">
@@ -239,6 +257,80 @@ export function MapFeaturePopup({
                   </dl>
                 </section>
               ))}
+
+              {documents.length > 0 ? (
+                <section>
+                  <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Property Documents
+                  </h4>
+                  <ul className="space-y-2">
+                    {documents.map((doc) => (
+                      <li key={doc.kind}>
+                        {doc.available ? (
+                          <button
+                            type="button"
+                            onClick={() => onOpenDocument?.(doc)}
+                            className="flex w-full items-center gap-2 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-left text-sm font-medium text-teal-800 transition hover:bg-teal-100"
+                          >
+                            <FileText size={16} className="shrink-0" />
+                            <span>{doc.label}</span>
+                          </button>
+                        ) : doc.uploadHref ? (
+                          <Link
+                            href={doc.uploadHref}
+                            className="flex w-full flex-col gap-1 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm transition hover:bg-amber-100"
+                          >
+                            <span className="flex items-center gap-2 font-medium text-amber-900">
+                              <Upload size={16} className="shrink-0" />
+                              Upload {doc.label}
+                            </span>
+                            {doc.hint ? (
+                              <span className="text-[11px] leading-snug text-amber-800/80">
+                                {doc.hint}
+                              </span>
+                            ) : null}
+                          </Link>
+                        ) : (
+                          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                            <p className="font-medium text-slate-700">
+                              {doc.label}: Not Available
+                            </p>
+                            {doc.hint ? (
+                              <p className="mt-1 text-[11px] leading-snug">
+                                {doc.hint}
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
+              {propertyLinks.length > 0 ? (
+                <section>
+                  <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Property Actions
+                  </h4>
+                  <div className="space-y-2">
+                    {propertyLinks.map((link) => (
+                      <Link
+                        key={link.href + link.label}
+                        href={link.href}
+                        className={
+                          link.variant === "primary"
+                            ? "flex w-full items-center justify-center gap-2 rounded-md bg-teal-700 px-3 py-2 text-sm font-medium text-white transition hover:bg-teal-800"
+                            : "flex w-full items-center justify-center gap-2 rounded-md border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-sky-800 transition hover:bg-sky-50"
+                        }
+                      >
+                        <ExternalLink size={14} className="shrink-0" />
+                        {link.label}
+                      </Link>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
           )}
         </div>

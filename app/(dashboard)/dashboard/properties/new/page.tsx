@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { PropertyCreateForm } from "@/components/properties/property-create-form";
 
@@ -13,7 +14,9 @@ export default function NewPropertyPage() {
           { label: "Create" },
         ]}
       />
-      <PropertyCreateForm />
+      <Suspense fallback={<p className="text-sm text-slate-500">Loading form…</p>}>
+        <PropertyCreateForm />
+      </Suspense>
     </div>
   );
 }

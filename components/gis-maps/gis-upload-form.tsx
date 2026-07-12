@@ -310,7 +310,14 @@ export function GisUploadForm() {
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
             <p className="text-lg font-medium text-slate-800">Drag &amp; Drop MPK</p>
-            <p className="mt-2 text-sm text-slate-500">or Choose File</p>
+            <p className="mt-3">
+              <span className="inline-flex items-center justify-center rounded-md border border-teal-800 bg-teal-700 px-4 py-2 text-sm font-semibold text-white shadow-sm">
+                Choose File
+              </span>
+            </p>
+            <p className="mt-2 text-sm text-slate-500">
+              or drop a supported GIS file here
+            </p>
             {file && (
               <p className="mt-4 text-sm font-medium text-cyan-900">{file.name}</p>
             )}

@@ -21,6 +21,7 @@ export type MutationQueueRow = {
   remarks: string | null;
   plotNumber: string;
   parcelId: string;
+  mouzaId: string | null;
   mouzaName: string;
   districtName: string;
   propertyId: string | null;
@@ -206,6 +207,7 @@ export function MutationQueuePanel({
                 <th className="px-4 py-3">Applied</th>
                 <th className="px-4 py-3">Decision</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Map</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -256,6 +258,18 @@ export function MutationQueuePanel({
                         }
                         variant={statusVariant(status)}
                       />
+                    </td>
+                    <td className="px-4 py-3">
+                      {mutationCase.mouzaId && mutationCase.plotNumber ? (
+                        <Link
+                          href={`/dashboard/maps/viewer?mouzaId=${encodeURIComponent(mutationCase.mouzaId)}&plotNo=${encodeURIComponent(mutationCase.plotNumber)}`}
+                          className="text-cyan-800 hover:underline"
+                        >
+                          View on Map
+                        </Link>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col items-end gap-2">

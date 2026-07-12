@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { PropertyTabs } from "@/components/properties/property-tabs";
 import { DeedUpdateForm } from "@/components/properties/deed-update-form";
+import { ViewOnMapButton } from "@/components/properties/gis-property-sync";
 import { getPropertyDetail } from "@/lib/properties/queries";
+import { getPropertyGisSnapshot } from "@/lib/properties/gis-sync";
 import { getSession } from "@/lib/auth/session";
 import { canPerformPropertyAction } from "@/lib/auth/property-permissions";
 
@@ -12,7 +14,10 @@ export default async function PropertyDeedPage({
 }) {
   const { id } = await params;
   const session = await getSession();
-  const data = await getPropertyDetail(id);
+  const [data, snapshot] = await Promise.all([
+    getPropertyDetail(id),
+    getPropertyGisSnapshot(id),
+  ]);
   if (!data) notFound();
 
   const canEdit =
@@ -21,9 +26,17 @@ export default async function PropertyDeedPage({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">{data.property.propertyCode}</h1>
-        <p className="text-sm text-slate-500">Registered Deed Information</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{data.property.propertyCode}</h1>
+          <p className="text-sm text-slate-500">
+            Registered Deed Information
+            {snapshot
+              ? ` · ${snapshot.mouza ?? ""} Plot ${snapshot.plotNumber ?? ""}`
+              : ""}
+          </p>
+        </div>
+        <ViewOnMapButton href={snapshot?.mapHref} />
       </div>
       <PropertyTabs propertyId={id} active="deed" />
 

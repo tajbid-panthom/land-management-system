@@ -1,10 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FileChooseField } from "@/components/ui/file-choose-field";
+import {
+  EMPTY_OWNER_DETAILS,
+  OwnerDetailsFields,
+  type OwnerDetailsValues,
+} from "@/components/properties/owner-details-fields";
 
 type GeoItem = { id: string; name: string };
-type MouzaOption = { id: string; name: string; jlNumber: string };
+type MouzaOption = { id: string; name: string; jlNumber: string | null };
+type PlotOption = {
+  id: string;
+  name: string;
+  plotNumber?: string | null;
+};
 
 function FileUploadField({
   id,
@@ -13,6 +24,7 @@ function FileUploadField({
   accept,
   fileName,
   onFileChange,
+  hint,
 }: {
   id: string;
   name: string;
@@ -20,29 +32,19 @@ function FileUploadField({
   accept: string;
   fileName: string | null;
   onFileChange: (file: File | null) => void;
+  hint?: string;
 }) {
   return (
     <div className="text-sm">
       <span className="mb-2 block font-medium text-slate-700">{label}</span>
-      <div className="flex flex-wrap items-center gap-3 rounded-md border border-sky-200 bg-sky-50/50 p-3">
-        <label
-          htmlFor={id}
-          className="cursor-pointer rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800"
-        >
-          Choose file
-        </label>
-        <input
-          id={id}
-          name={name}
-          type="file"
-          accept={accept}
-          className="sr-only"
-          onChange={(e) => onFileChange(e.target.files?.[0] ?? null)}
-        />
-        <span className="min-w-0 flex-1 truncate text-slate-600">
-          {fileName ?? "No file selected"}
-        </span>
-      </div>
+      {hint ? <p className="mb-2 text-xs text-slate-500">{hint}</p> : null}
+      <FileChooseField
+        id={id}
+        name={name}
+        accept={accept}
+        emptyLabel={fileName ?? "No file selected"}
+        onFileChange={onFileChange}
+      />
     </div>
   );
 }
@@ -50,7 +52,7 @@ function FileUploadField({
 async function loadGeo(
   level: string,
   parentId?: string,
-): Promise<GeoItem[] | MouzaOption[]> {
+): Promise<GeoItem[] | MouzaOption[] | PlotOption[]> {
   const params = new URLSearchParams({ level });
   if (parentId) params.set("parentId", parentId);
   const res = await fetch(`/api/geography?${params}`);
@@ -62,10 +64,25 @@ async function uploadDocument(
   propertyId: string,
   categorySlug: string,
   file: File,
+  owner: OwnerDetailsValues,
 ) {
   const uploadData = new FormData();
   uploadData.append("file", file);
   uploadData.append("categorySlug", categorySlug);
+  uploadData.append("ownerFullName", owner.fullName.trim());
+  uploadData.append(
+    "ownerFatherOrHusbandName",
+    owner.fatherOrHusbandName.trim(),
+  );
+  uploadData.append("ownerMotherName", owner.motherName.trim());
+  uploadData.append("ownerNid", owner.nid.trim());
+  uploadData.append("ownerPhone", owner.phone.trim());
+  uploadData.append("ownerEmail", owner.email.trim());
+  uploadData.append("ownerDateOfBirth", owner.dateOfBirth.trim());
+  uploadData.append(
+    "ownerSharePercentage",
+    owner.sharePercentage.trim() || "100",
+  );
   const res = await fetch(`/api/properties/${propertyId}/documents`, {
     method: "POST",
     body: uploadData,
@@ -78,26 +95,152 @@ async function uploadDocument(
 
 export function PropertyCreateForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const prefillApplied = useRef(false);
   const [loading, setLoading] = useState(false);
+  const [prefillLoading, setPrefillLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [prefillNotice, setPrefillNotice] = useState<string | null>(null);
 
   const [divisions, setDivisions] = useState<GeoItem[]>([]);
   const [districts, setDistricts] = useState<GeoItem[]>([]);
   const [upazilas, setUpazilas] = useState<GeoItem[]>([]);
   const [unions, setUnions] = useState<GeoItem[]>([]);
   const [mouzas, setMouzas] = useState<MouzaOption[]>([]);
+  const [plots, setPlots] = useState<PlotOption[]>([]);
 
   const [divisionId, setDivisionId] = useState("");
   const [districtId, setDistrictId] = useState("");
   const [upazilaId, setUpazilaId] = useState("");
   const [unionId, setUnionId] = useState("");
   const [mouzaId, setMouzaId] = useState("");
+  const [jlNumber, setJlNumber] = useState("");
+  const [plotNumber, setPlotNumber] = useState("");
+  const [areaValue, setAreaValue] = useState("");
+  const [areaUnit, setAreaUnit] = useState("decimal");
   const [khatianFileName, setKhatianFileName] = useState<string | null>(null);
   const [deedFileName, setDeedFileName] = useState<string | null>(null);
+  const [mutationFileName, setMutationFileName] = useState<string | null>(null);
+  const [owner, setOwner] = useState<OwnerDetailsValues>(EMPTY_OWNER_DETAILS);
 
   useEffect(() => {
     loadGeo("divisions").then((items) => setDivisions(items as GeoItem[]));
   }, []);
+
+  useEffect(() => {
+    if (prefillApplied.current) return;
+    const fromGis = searchParams.get("fromGis") === "1";
+    const district = searchParams.get("district");
+    const upazila = searchParams.get("upazila");
+    const mouza = searchParams.get("mouza");
+    const plotNo = searchParams.get("plotNo");
+    const jlNo = searchParams.get("jlNo");
+    const area = searchParams.get("areaValue");
+    const unit = searchParams.get("areaUnit");
+
+    if (!fromGis && !district && !upazila && !mouza && !plotNo) return;
+    prefillApplied.current = true;
+
+    let cancelled = false;
+    setPrefillLoading(true);
+
+    (async () => {
+      try {
+        const params = new URLSearchParams({ level: "resolve" });
+        if (district) params.set("district", district);
+        if (upazila) params.set("upazila", upazila);
+        if (mouza) params.set("mouza", mouza);
+
+        const resolveRes = await fetch(`/api/geography?${params}`);
+        const resolved = await resolveRes.json();
+        if (cancelled) return;
+
+        if (resolved.divisionId) {
+          setDivisionId(resolved.divisionId);
+          const districtItems = (await loadGeo(
+            "districts",
+            resolved.divisionId,
+          )) as GeoItem[];
+          if (cancelled) return;
+          setDistricts(districtItems);
+        }
+
+        if (resolved.districtId) {
+          setDistrictId(resolved.districtId);
+          const upazilaItems = (await loadGeo(
+            "upazilas",
+            resolved.districtId,
+          )) as GeoItem[];
+          if (cancelled) return;
+          setUpazilas(upazilaItems);
+        }
+
+        if (resolved.upazilaId) {
+          setUpazilaId(resolved.upazilaId);
+          const [unionItems, mouzaItems] = await Promise.all([
+            loadGeo("unions", resolved.upazilaId),
+            loadGeo("mouzas", resolved.upazilaId),
+          ]);
+          if (cancelled) return;
+          setUnions(unionItems as GeoItem[]);
+          setMouzas(mouzaItems as MouzaOption[]);
+        }
+
+        if (resolved.unionId) {
+          setUnionId(resolved.unionId);
+          const mouzaItems = (await loadGeo(
+            "mouzas",
+            resolved.unionId,
+          )) as MouzaOption[];
+          if (cancelled) return;
+          setMouzas(mouzaItems);
+        }
+
+        if (resolved.mouzaId) {
+          setMouzaId(resolved.mouzaId);
+          const plotItems = (await loadGeo(
+            "plots",
+            resolved.mouzaId,
+          )) as PlotOption[];
+          if (cancelled) return;
+          setPlots(plotItems);
+        }
+
+        setJlNumber(jlNo || resolved.jlNumber || "");
+        if (plotNo) setPlotNumber(plotNo);
+        if (area) setAreaValue(area);
+        if (unit) setAreaUnit(unit);
+
+        const bits = [
+          resolved.districtName,
+          resolved.upazilaName,
+          resolved.mouzaName,
+          plotNo ? `Plot ${plotNo}` : null,
+        ].filter(Boolean);
+        setPrefillNotice(
+          bits.length > 0
+            ? `Prefilled from GIS plot: ${bits.join(" · ")}. Upload Registration Deed and Mutation PDFs below so they appear on the map.`
+            : "Opened from GIS map. Complete location fields and upload documents.",
+        );
+      } catch {
+        if (!cancelled) {
+          if (plotNo) setPlotNumber(plotNo);
+          if (jlNo) setJlNumber(jlNo);
+          if (area) setAreaValue(area);
+          if (unit) setAreaUnit(unit);
+          setPrefillNotice(
+            "Opened from GIS map, but geography IDs could not be resolved automatically. Select location fields manually.",
+          );
+        }
+      } finally {
+        if (!cancelled) setPrefillLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
 
   async function onDivisionChange(id: string) {
     setDivisionId(id);
@@ -105,10 +248,13 @@ export function PropertyCreateForm() {
     setUpazilaId("");
     setUnionId("");
     setMouzaId("");
+    setJlNumber("");
+    setPlotNumber("");
     setDistricts([]);
     setUpazilas([]);
     setUnions([]);
     setMouzas([]);
+    setPlots([]);
     if (id) {
       setDistricts((await loadGeo("districts", id)) as GeoItem[]);
     }
@@ -119,9 +265,12 @@ export function PropertyCreateForm() {
     setUpazilaId("");
     setUnionId("");
     setMouzaId("");
+    setJlNumber("");
+    setPlotNumber("");
     setUpazilas([]);
     setUnions([]);
     setMouzas([]);
+    setPlots([]);
     if (id) {
       setUpazilas((await loadGeo("upazilas", id)) as GeoItem[]);
     }
@@ -131,19 +280,43 @@ export function PropertyCreateForm() {
     setUpazilaId(id);
     setUnionId("");
     setMouzaId("");
+    setJlNumber("");
+    setPlotNumber("");
     setUnions([]);
     setMouzas([]);
+    setPlots([]);
     if (id) {
-      setUnions((await loadGeo("unions", id)) as GeoItem[]);
+      const [unionItems, mouzaItems] = await Promise.all([
+        loadGeo("unions", id),
+        loadGeo("mouzas", id),
+      ]);
+      setUnions(unionItems as GeoItem[]);
+      setMouzas(mouzaItems as MouzaOption[]);
     }
   }
 
   async function onUnionChange(id: string) {
     setUnionId(id);
     setMouzaId("");
+    setJlNumber("");
+    setPlotNumber("");
     setMouzas([]);
+    setPlots([]);
     if (id) {
       setMouzas((await loadGeo("mouzas", id)) as MouzaOption[]);
+    } else if (upazilaId) {
+      setMouzas((await loadGeo("mouzas", upazilaId)) as MouzaOption[]);
+    }
+  }
+
+  async function onMouzaChange(id: string) {
+    setMouzaId(id);
+    setPlotNumber("");
+    setPlots([]);
+    const selected = mouzas.find((m) => m.id === id);
+    setJlNumber(selected?.jlNumber ?? "");
+    if (id) {
+      setPlots((await loadGeo("plots", id)) as PlotOption[]);
     }
   }
 
@@ -152,26 +325,83 @@ export function PropertyCreateForm() {
     setLoading(true);
     setError(null);
 
+    if (
+      !divisionId ||
+      !districtId ||
+      !upazilaId ||
+      !mouzaId ||
+      !jlNumber ||
+      !plotNumber
+    ) {
+      setError(
+        "Division, District, Upazila / Thana, Mouza, JL Number, and Plot Number are required",
+      );
+      setLoading(false);
+      return;
+    }
+
+    const fromGis = searchParams.get("fromGis") === "1";
+    const plotBelongsToMouza =
+      fromGis ||
+      plots.length === 0 ||
+      plots.some(
+        (p) => (p.plotNumber ?? p.name) === plotNumber || p.id === plotNumber,
+      );
+    if (!plotBelongsToMouza) {
+      setError("Selected Plot Number must belong to the selected Mouza");
+      setLoading(false);
+      return;
+    }
+
+    if (!owner.fullName.trim()) {
+      setError("Property owner full name is required");
+      setLoading(false);
+      return;
+    }
+
     const form = new FormData(e.currentTarget);
     const selectedMouza = mouzas.find((m) => m.id === mouzaId);
+    const deedCopy = form.get("deedCopy") as File | null;
+    const mutationCopy = form.get("mutationCopy") as File | null;
+
+    if (deedCopy?.size && deedCopy.type !== "application/pdf") {
+      setError("Registration Deed must be a PDF file");
+      setLoading(false);
+      return;
+    }
+    if (mutationCopy?.size && mutationCopy.type !== "application/pdf") {
+      setError("Mutation / Namjari Certificate must be a PDF file");
+      setLoading(false);
+      return;
+    }
 
     const body = {
       status: form.get("status") || "active",
       location: {
-        divisionId: divisionId || undefined,
-        districtId: districtId || undefined,
-        upazilaId: upazilaId || undefined,
+        divisionId,
+        districtId,
+        upazilaId,
         unionId: unionId || undefined,
         mouzaId,
-        plotNumber: form.get("plotNumber"),
-        areaValue: form.get("areaValue"),
-        areaUnit: form.get("areaUnit"),
+        plotNumber,
+        areaValue: form.get("areaValue") || areaValue,
+        areaUnit: form.get("areaUnit") || areaUnit,
         mouzaName: selectedMouza?.name,
-        jlNumber: selectedMouza?.jlNumber,
+        jlNumber,
         khatianCs: form.get("khatianCs") || undefined,
         khatianSa: form.get("khatianSa") || undefined,
         khatianRs: form.get("khatianRs") || undefined,
         khatianBs: form.get("khatianBs") || undefined,
+      },
+      owner: {
+        fullName: owner.fullName.trim(),
+        fatherOrHusbandName: owner.fatherOrHusbandName.trim() || undefined,
+        motherName: owner.motherName.trim() || undefined,
+        nid: owner.nid.trim() || undefined,
+        phone: owner.phone.trim() || undefined,
+        email: owner.email.trim() || undefined,
+        dateOfBirth: owner.dateOfBirth.trim() || undefined,
+        sharePercentage: Number(owner.sharePercentage || "100"),
       },
       deed: form.get("deedNumber")
         ? {
@@ -198,14 +428,21 @@ export function PropertyCreateForm() {
     const propertyId = data.property.id as string;
 
     const khatianCopy = form.get("khatianCopy") as File | null;
-    const deedCopy = form.get("deedCopy") as File | null;
 
     try {
       if (khatianCopy?.size) {
-        await uploadDocument(propertyId, "khatian_copy", khatianCopy);
+        await uploadDocument(propertyId, "khatian_copy", khatianCopy, owner);
       }
       if (deedCopy?.size) {
-        await uploadDocument(propertyId, "deed_copy", deedCopy);
+        await uploadDocument(propertyId, "deed_copy", deedCopy, owner);
+      }
+      if (mutationCopy?.size) {
+        await uploadDocument(
+          propertyId,
+          "mutation_certificate",
+          mutationCopy,
+          owner,
+        );
       }
     } catch (uploadError) {
       setError(
@@ -219,12 +456,17 @@ export function PropertyCreateForm() {
       return;
     }
 
-    router.push(`/dashboard/properties/${propertyId}`);
+    router.push(`/dashboard/properties/${propertyId}/documents`);
     router.refresh();
   }
 
   const selectClass =
     "mt-1 w-full rounded-md border border-sky-200 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400";
+
+  const plotInList = plots.some(
+    (p) => (p.plotNumber ?? p.name) === plotNumber || p.id === plotNumber,
+  );
+  const usePlotSelect = plots.length > 0 && (plotInList || !plotNumber);
 
   return (
     <form
@@ -234,14 +476,29 @@ export function PropertyCreateForm() {
       {error && (
         <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>
       )}
+      {prefillNotice && (
+        <p className="rounded-md border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900">
+          {prefillNotice}
+        </p>
+      )}
+      {prefillLoading ? (
+        <p className="text-sm text-slate-500">
+          Resolving GIS location into property fields…
+        </p>
+      ) : null}
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
           Location
         </h2>
+        <p className="text-xs text-slate-500">
+          Cascading selection: Division → District → Upazila / Thana → Mouza →
+          JL Number → Plot Number. All fields are mandatory before document
+          upload.
+        </p>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block text-sm">
-            Division
+            Division *
             <select
               required
               value={divisionId}
@@ -257,7 +514,7 @@ export function PropertyCreateForm() {
             </select>
           </label>
           <label className="block text-sm">
-            District
+            District *
             <select
               required
               value={districtId}
@@ -274,7 +531,7 @@ export function PropertyCreateForm() {
             </select>
           </label>
           <label className="block text-sm">
-            Upazila / Thana
+            Upazila / Thana *
             <select
               required
               value={upazilaId}
@@ -291,15 +548,14 @@ export function PropertyCreateForm() {
             </select>
           </label>
           <label className="block text-sm">
-            Union
+            Union (optional)
             <select
-              required
               value={unionId}
               onChange={(e) => onUnionChange(e.target.value)}
               disabled={!upazilaId}
               className={selectClass}
             >
-              <option value="">Select union</option>
+              <option value="">Skip / select union</option>
               {unions.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
@@ -308,29 +564,59 @@ export function PropertyCreateForm() {
             </select>
           </label>
           <label className="block text-sm">
-            Mouza
+            Mouza *
             <select
               required
               value={mouzaId}
-              onChange={(e) => setMouzaId(e.target.value)}
-              disabled={!unionId}
+              onChange={(e) => onMouzaChange(e.target.value)}
+              disabled={!upazilaId}
               className={selectClass}
             >
               <option value="">Select mouza</option>
               {mouzas.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.name} (JL {m.jlNumber})
+                  {m.name}
+                  {m.jlNumber ? ` (JL ${m.jlNumber})` : ""}
                 </option>
               ))}
             </select>
           </label>
           <label className="block text-sm">
-            Plot / Dag Number
+            JL Number *
             <input
-              name="plotNumber"
               required
+              value={jlNumber}
+              onChange={(e) => setJlNumber(e.target.value)}
               className="mt-1 w-full rounded-md border border-sky-200 px-3 py-2"
             />
+          </label>
+          <label className="block text-sm">
+            Plot / Dag Number *
+            {usePlotSelect ? (
+              <select
+                required
+                value={plotNumber}
+                onChange={(e) => setPlotNumber(e.target.value)}
+                disabled={!mouzaId}
+                className={selectClass}
+              >
+                <option value="">Select plot belonging to mouza</option>
+                {plots.map((p) => (
+                  <option key={p.id} value={p.plotNumber ?? p.name}>
+                    {p.plotNumber ?? p.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                required
+                value={plotNumber}
+                onChange={(e) => setPlotNumber(e.target.value)}
+                disabled={!mouzaId}
+                placeholder="Enter plot / dag number"
+                className="mt-1 w-full rounded-md border border-sky-200 px-3 py-2 disabled:bg-slate-50"
+              />
+            )}
           </label>
           <label className="block text-sm">
             Area Value
@@ -339,6 +625,8 @@ export function PropertyCreateForm() {
               required
               type="number"
               step="any"
+              value={areaValue}
+              onChange={(e) => setAreaValue(e.target.value)}
               className="mt-1 w-full rounded-md border border-sky-200 px-3 py-2"
             />
           </label>
@@ -347,6 +635,8 @@ export function PropertyCreateForm() {
             <select
               name="areaUnit"
               required
+              value={areaUnit}
+              onChange={(e) => setAreaUnit(e.target.value)}
               className="mt-1 w-full rounded-md border border-sky-200 px-3 py-2"
             >
               <option value="decimal">Decimal</option>
@@ -370,13 +660,41 @@ export function PropertyCreateForm() {
       </section>
 
       <section className="space-y-4">
+        <OwnerDetailsFields
+          values={owner}
+          onChange={setOwner}
+          required
+          description="Owner details are required before creating the property and uploading documents."
+        />
+      </section>
+
+      <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Documents (optional)
+          Property Documents
         </h2>
         <p className="text-xs text-slate-500">
-          PDF, JPG, PNG, TIFF — max 20 MB each
+          Registration Deed and Mutation Certificate accept PDF only (max 20 MB).
+          These PDFs are what the map popup opens after the property is linked.
         </p>
         <div className="grid gap-4 md:grid-cols-2">
+          <FileUploadField
+            id="deedCopy"
+            name="deedCopy"
+            label="Registration Deed (PDF)"
+            accept=".pdf,application/pdf"
+            fileName={deedFileName}
+            onFileChange={(file) => setDeedFileName(file?.name ?? null)}
+            hint="Synced to the GIS plot after upload"
+          />
+          <FileUploadField
+            id="mutationCopy"
+            name="mutationCopy"
+            label="Mutation / Namjari Certificate (PDF)"
+            accept=".pdf,application/pdf"
+            fileName={mutationFileName}
+            onFileChange={(file) => setMutationFileName(file?.name ?? null)}
+            hint="Synced to the GIS plot after upload"
+          />
           <FileUploadField
             id="khatianCopy"
             name="khatianCopy"
@@ -385,20 +703,12 @@ export function PropertyCreateForm() {
             fileName={khatianFileName}
             onFileChange={(file) => setKhatianFileName(file?.name ?? null)}
           />
-          <FileUploadField
-            id="deedCopy"
-            name="deedCopy"
-            label="Deed Copy"
-            accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif"
-            fileName={deedFileName}
-            onFileChange={(file) => setDeedFileName(file?.name ?? null)}
-          />
         </div>
       </section>
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
-          Registered Deed (optional)
+          Registered Deed (optional metadata)
         </h2>
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block text-sm">
@@ -433,7 +743,7 @@ export function PropertyCreateForm() {
 
       <button
         type="submit"
-        disabled={loading}
+        disabled={loading || prefillLoading}
         className="rounded-md bg-teal-700 px-6 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-50"
       >
         {loading ? "Creating…" : "Create Property"}

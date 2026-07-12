@@ -1,4 +1,4 @@
-import { and, asc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   districts,
@@ -17,7 +17,16 @@ import {
   deeds,
   mutationCases,
   courtCases,
+  properties,
+  propertyDeeds,
+  propertyDocuments,
+  documentCategories,
 } from "@/lib/db/schema";
+import type { MapBBox } from "@/lib/gis-maps/viewport";
+import {
+  defaultViewportFeatureLimit,
+  simplifyToleranceForZoom,
+} from "@/lib/gis-maps/viewport";
 
 export async function listDatasets() {
   return db
@@ -253,6 +262,18 @@ export async function getMouzaGisDetail(mouzaId: string, plotNo?: string) {
   let registrationDate: string | null = null;
   let mutationStatus: string | null = null;
   let courtCaseStatus: string | null = null;
+  let propertyId: string | null = null;
+  let propertyCode: string | null = null;
+  let registrationDeed: {
+    id: string;
+    fileName: string;
+    mimeType: string;
+  } | null = null;
+  let mutationCertificate: {
+    id: string;
+    fileName: string;
+    mimeType: string;
+  } | null = null;
 
   if (record.parcelId) {
     const [
@@ -261,6 +282,7 @@ export async function getMouzaGisDetail(mouzaId: string, plotNo?: string) {
       parcelDeeds,
       parcelMutations,
       parcelCourtCases,
+      linkedProperty,
     ] = await Promise.all([
       db.select().from(khatians).where(eq(khatians.parcelId, record.parcelId)),
       db
@@ -275,6 +297,19 @@ export async function getMouzaGisDetail(mouzaId: string, plotNo?: string) {
       db.select().from(deeds).where(eq(deeds.parcelId, record.parcelId)),
       db.select().from(mutationCases).where(eq(mutationCases.parcelId, record.parcelId)),
       db.select().from(courtCases).where(eq(courtCases.parcelId, record.parcelId)),
+      db
+        .select({
+          id: properties.id,
+          propertyCode: properties.propertyCode,
+        })
+        .from(properties)
+        .where(
+          and(
+            eq(properties.parcelId, record.parcelId),
+            isNull(properties.deletedAt),
+          ),
+        )
+        .limit(1),
     ]);
 
     if (parcelKhatians.length > 0) {
@@ -314,6 +349,74 @@ export async function getMouzaGisDetail(mouzaId: string, plotNo?: string) {
         .map((c) => c.status ?? "ongoing")
         .join(", ");
     }
+
+    const property = linkedProperty[0];
+    if (property) {
+      propertyId = property.id;
+      propertyCode = property.propertyCode;
+
+      const [propertyDeed] = await db
+        .select()
+        .from(propertyDeeds)
+        .where(eq(propertyDeeds.propertyId, property.id))
+        .limit(1);
+
+      if (propertyDeed) {
+        registeredDeedNumber =
+          propertyDeed.deedNumber ?? registeredDeedNumber;
+        registrationDate =
+          propertyDeed.registrationDate ?? registrationDate;
+        mutationStatus =
+          propertyDeed.namjariStatus ??
+          propertyDeed.mutationCaseNumber ??
+          mutationStatus;
+      }
+
+      const docs = await db
+        .select({
+          id: propertyDocuments.id,
+          fileName: propertyDocuments.fileName,
+          mimeType: propertyDocuments.mimeType,
+          categorySlug: documentCategories.slug,
+          createdAt: propertyDocuments.createdAt,
+        })
+        .from(propertyDocuments)
+        .innerJoin(
+          documentCategories,
+          eq(propertyDocuments.categoryId, documentCategories.id),
+        )
+        .where(
+          and(
+            eq(propertyDocuments.propertyId, property.id),
+            isNull(propertyDocuments.deletedAt),
+            or(
+              eq(documentCategories.slug, "deed_copy"),
+              eq(documentCategories.slug, "mutation_certificate"),
+            ),
+          ),
+        )
+        .orderBy(desc(propertyDocuments.createdAt));
+
+      for (const doc of docs) {
+        if (doc.categorySlug === "deed_copy" && !registrationDeed) {
+          registrationDeed = {
+            id: doc.id,
+            fileName: doc.fileName,
+            mimeType: doc.mimeType,
+          };
+        }
+        if (
+          doc.categorySlug === "mutation_certificate" &&
+          !mutationCertificate
+        ) {
+          mutationCertificate = {
+            id: doc.id,
+            fileName: doc.fileName,
+            mimeType: doc.mimeType,
+          };
+        }
+      }
+    }
   }
 
   return {
@@ -334,6 +437,10 @@ export async function getMouzaGisDetail(mouzaId: string, plotNo?: string) {
     registrationDate,
     mutationStatus,
     courtCaseStatus,
+    propertyId,
+    propertyCode,
+    registrationDeed,
+    mutationCertificate,
   };
 }
 
@@ -749,8 +856,32 @@ export async function searchMouzaRecords(
 
 export async function getSynchronizedDatasetGeoJson(
   datasetId: string,
-  limit = 5000,
+  options?: {
+    limit?: number;
+    bbox?: MapBBox;
+    zoom?: number;
+  },
 ) {
+  const zoom = options?.zoom;
+  const limit =
+    options?.limit ??
+    (options?.bbox ? defaultViewportFeatureLimit(zoom) : 5000);
+  const tolerance = simplifyToleranceForZoom(zoom);
+  const bbox = options?.bbox;
+
+  const bboxFilter = bbox
+    ? sql`AND f.boundary && ST_MakeEnvelope(${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}, 4326)
+         AND ST_Intersects(
+           f.boundary,
+           ST_MakeEnvelope(${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}, 4326)
+         )`
+    : sql``;
+
+  const geomExpr =
+    tolerance > 0
+      ? sql`ST_AsGeoJSON(ST_SimplifyPreserveTopology(f.boundary, ${tolerance}))`
+      : sql`ST_AsGeoJSON(f.boundary)`;
+
   const result = await db.execute<{
     geojson: string;
     record_id: string;
@@ -770,7 +901,7 @@ export async function getSynchronizedDatasetGeoJson(
     sync_status: string | null;
   }>(sql`
     SELECT
-      ST_AsGeoJSON(f.boundary) as geojson,
+      ${geomExpr} as geojson,
       r.id as record_id,
       r.mouza_id,
       r.plot_no,
@@ -791,6 +922,7 @@ export async function getSynchronizedDatasetGeoJson(
     WHERE r.dataset_id = ${datasetId}::uuid
       AND r.sync_status = 'synced'
       AND f.boundary IS NOT NULL
+      ${bboxFilter}
     ORDER BY r.mauza, r.plot_no
     LIMIT ${limit}
   `);
@@ -823,6 +955,12 @@ export async function getSynchronizedDatasetGeoJson(
       },
       geometry: JSON.parse(row.geojson),
     })),
+    meta: {
+      returned: rowList.length,
+      bbox: bbox ?? null,
+      zoom: zoom ?? null,
+      truncated: rowList.length >= limit,
+    },
   };
 }
 

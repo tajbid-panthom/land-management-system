@@ -255,12 +255,86 @@ async function seed() {
         .insert(mouzas)
         .values({
           unionId: ashuliaUnion.id,
+          upazilaId: savarUpazila.id,
           name: "Baipail",
           nameBn: "বাইপাইল",
           jlNumber: "JL-1042",
         })
         .returning()
     )[0];
+
+  // Dhaka → Gulshan (Upazila/Thana) → Uttar Meradia (Mouza)
+  const [existingGulshan] = await db
+    .select()
+    .from(upazilas)
+    .where(
+      and(
+        eq(upazilas.districtId, dhakaDistrict.id),
+        eq(upazilas.name, "Gulshan"),
+      ),
+    )
+    .limit(1);
+
+  const gulshanUpazila =
+    existingGulshan ??
+    (
+      await db
+        .insert(upazilas)
+        .values({
+          districtId: dhakaDistrict.id,
+          name: "Gulshan",
+          nameBn: "গুলশান",
+          code: "UPZ-DHK-GULSHAN",
+        })
+        .returning()
+    )[0];
+
+  const [existingMeradiaUnion] = await db
+    .select()
+    .from(unions)
+    .where(
+      and(
+        eq(unions.upazilaId, gulshanUpazila.id),
+        eq(unions.name, "Meradia"),
+      ),
+    )
+    .limit(1);
+
+  const meradiaUnion =
+    existingMeradiaUnion ??
+    (
+      await db
+        .insert(unions)
+        .values({
+          upazilaId: gulshanUpazila.id,
+          name: "Meradia",
+          type: "union",
+          code: "UNI-DHK-GUL-MERADIA",
+        })
+        .returning()
+    )[0];
+
+  const [existingUttarMeradia] = await db
+    .select()
+    .from(mouzas)
+    .where(
+      and(
+        eq(mouzas.name, "Uttar Meradia"),
+        eq(mouzas.jlNumber, "JL-2785"),
+      ),
+    )
+    .limit(1);
+
+  if (!existingUttarMeradia) {
+    await db.insert(mouzas).values({
+      unionId: meradiaUnion.id,
+      upazilaId: gulshanUpazila.id,
+      name: "Uttar Meradia",
+      nameBn: "উত্তর মেড়াদিয়া",
+      jlNumber: "JL-2785",
+      mCode: "UTTAR-MERADIA",
+    });
+  }
 
   const [existingParcel] = await db
     .select()
@@ -351,10 +425,10 @@ async function seed() {
   }
 
   const categories = [
-    { slug: "deed_copy", name: "Deed Copy" },
+    { slug: "deed_copy", name: "Registration Deed" },
     { slug: "khatian_copy", name: "Khatian Copy" },
     { slug: "survey_map", name: "Survey Map" },
-    { slug: "mutation_certificate", name: "Mutation Certificate" },
+    { slug: "mutation_certificate", name: "Mutation / Namjari Certificate" },
     { slug: "court_documents", name: "Court Documents" },
     { slug: "power_of_attorney", name: "Power of Attorney" },
     { slug: "gis_files", name: "GIS Files" },
@@ -368,6 +442,11 @@ async function seed() {
       .limit(1);
     if (!existing) {
       await db.insert(documentCategories).values(cat);
+    } else if (existing.name !== cat.name) {
+      await db
+        .update(documentCategories)
+        .set({ name: cat.name })
+        .where(eq(documentCategories.id, existing.id));
     }
   }
 

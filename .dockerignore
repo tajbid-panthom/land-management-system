@@ -2,6 +2,7 @@
 .gitignore
 .next
 node_modules
+.pnpm-store
 uploads
 *.md
 .env
@@ -13,3 +14,5 @@ uploads
 coverage
 agent-transcripts
 **/*.tsbuildinfo
+**/__pycache__
+**/*.pyc

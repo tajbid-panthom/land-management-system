@@ -1,6 +1,6 @@
 {
-  "id": "ed891afe-b763-4245-be59-f7b178dfcdbc",
-  "prevId": "cf9e3ade-7cc8-4088-9ff1-3e2b08dc061b",
+  "id": "a0f4f6eb-d9f8-41a1-8834-3bfd316851c1",
+  "prevId": "ed891afe-b763-4245-be59-f7b178dfcdbc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -3043,6 +3043,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -3129,6 +3135,19 @@
           "tableTo": "users",
           "columnsFrom": [
             "uploaded_by"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "property_documents_updated_by_users_id_fk": {
+          "name": "property_documents_updated_by_users_id_fk",
+          "tableFrom": "property_documents",
+          "tableTo": "users",
+          "columnsFrom": [
+            "updated_by"
           ],
           "columnsTo": [
             "id"

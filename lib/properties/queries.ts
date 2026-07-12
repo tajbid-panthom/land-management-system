@@ -227,6 +227,7 @@ export async function listProperties(filters: PropertyFilters) {
         deletedAt: properties.deletedAt,
         plotNumber: propertyLocations.plotNumber,
         mouzaName: propertyLocations.mouzaName,
+        mouzaId: propertyLocations.mouzaId,
         jlNumber: propertyLocations.jlNumber,
         districtName: districts.name,
         areaDecimal: propertyLocations.areaDecimal,
@@ -291,11 +292,20 @@ export async function getPropertyDetail(id: string) {
       propertyLocations,
       eq(propertyLocations.propertyId, properties.id),
     )
-    .innerJoin(mouzas, eq(propertyLocations.mouzaId, mouzas.id))
-    .innerJoin(unions, eq(mouzas.unionId, unions.id))
-    .innerJoin(upazilas, eq(unions.upazilaId, upazilas.id))
-    .innerJoin(districts, eq(upazilas.districtId, districts.id))
-    .leftJoin(divisions, eq(districts.divisionId, divisions.id))
+    .leftJoin(mouzas, eq(propertyLocations.mouzaId, mouzas.id))
+    .leftJoin(unions, eq(propertyLocations.unionId, unions.id))
+    .leftJoin(
+      upazilas,
+      sql`${upazilas.id} = COALESCE(${propertyLocations.upazilaId}, ${mouzas.upazilaId}, ${unions.upazilaId})`,
+    )
+    .leftJoin(
+      districts,
+      sql`${districts.id} = COALESCE(${propertyLocations.districtId}, ${upazilas.districtId})`,
+    )
+    .leftJoin(
+      divisions,
+      sql`${divisions.id} = COALESCE(${propertyLocations.divisionId}, ${districts.divisionId})`,
+    )
     .where(eq(properties.id, id))
     .limit(1);
 
@@ -466,6 +476,43 @@ export async function userOwnsProperty(
   return ownedIds.includes(propertyId);
 }
 
+/** Verified current ownership required for owner document management. */
+export async function userOwnsVerifiedProperty(
+  userId: string,
+  propertyId: string,
+): Promise<boolean> {
+  const links = await db
+    .select({ ownerId: userOwnerLinks.ownerId })
+    .from(userOwnerLinks)
+    .where(eq(userOwnerLinks.userId, userId));
+
+  if (links.length === 0) return false;
+
+  const ownerIds = links.map((l) => l.ownerId);
+  const [property] = await db
+    .select({ parcelId: properties.parcelId })
+    .from(properties)
+    .where(and(eq(properties.id, propertyId), isNull(properties.deletedAt)))
+    .limit(1);
+
+  if (!property) return false;
+
+  const [record] = await db
+    .select({ id: ownershipRecords.id })
+    .from(ownershipRecords)
+    .where(
+      and(
+        eq(ownershipRecords.parcelId, property.parcelId),
+        inArray(ownershipRecords.ownerId, ownerIds),
+        eq(ownershipRecords.isCurrent, true),
+        eq(ownershipRecords.verificationStatus, "verified"),
+      ),
+    )
+    .limit(1);
+
+  return Boolean(record);
+}
+
 export async function getNextPropertySequence(): Promise<number> {
   const [row] = await db.select({ total: count() }).from(properties);
   return (row?.total ?? 0) + 1;
@@ -497,6 +544,16 @@ export async function createPropertyWithParcel(
       namjariStatus?: string;
       powerOfAttorney?: string;
       litigationStatus?: string;
+    };
+    owner: {
+      fullName: string;
+      nid?: string;
+      dateOfBirth?: string;
+      fatherOrHusbandName?: string;
+      motherName?: string;
+      phone?: string;
+      email?: string;
+      sharePercentage: number;
     };
   },
   userId: string,
@@ -596,6 +653,31 @@ export async function createPropertyWithParcel(
         updatedBy: userId,
       });
     }
+
+    const { encryptField } = await import("@/lib/crypto/encryption");
+    const [owner] = await tx
+      .insert(owners)
+      .values({
+        fullName: input.owner.fullName,
+        fatherOrHusbandName: input.owner.fatherOrHusbandName,
+        motherName: input.owner.motherName,
+        dateOfBirth: input.owner.dateOfBirth,
+        phone: input.owner.phone,
+        email: input.owner.email,
+        nidNumberEncrypted: input.owner.nid
+          ? encryptField(input.owner.nid)
+          : undefined,
+      })
+      .returning();
+
+    await tx.insert(ownershipRecords).values({
+      parcelId: parcel.id,
+      ownerId: owner.id,
+      sharePercentage: String(input.owner.sharePercentage),
+      effectiveFrom: new Date().toISOString().slice(0, 10),
+      isCurrent: true,
+      verificationStatus: "pending",
+    });
 
     await tx.insert(planningInformation).values({ propertyId: property.id });
     await tx.insert(inheritanceInformation).values({ propertyId: property.id });

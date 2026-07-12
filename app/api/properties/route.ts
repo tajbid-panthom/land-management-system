@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
       status: parsed.data.status,
       location: parsed.data.location,
       deed: parsed.data.deed,
+      owner: parsed.data.owner,
     },
     session.user.id,
   );

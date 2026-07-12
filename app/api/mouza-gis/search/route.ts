@@ -156,7 +156,17 @@ export async function GET(request: NextRequest) {
       if (!dataset) {
         return NextResponse.json({ error: "Dataset not found" }, { status: 404 });
       }
-      const geojson = await getSynchronizedDatasetGeoJson(datasetId);
+      const { parseBBoxParam } = await import("@/lib/gis-maps/viewport");
+      const bbox = parseBBoxParam(searchParams.get("bbox"));
+      const zoomRaw = searchParams.get("zoom");
+      const zoom = zoomRaw != null ? Number(zoomRaw) : undefined;
+      const limitRaw = searchParams.get("limit");
+      const limit = limitRaw != null ? Number(limitRaw) : undefined;
+      const geojson = await getSynchronizedDatasetGeoJson(datasetId, {
+        bbox: bbox ?? undefined,
+        zoom: Number.isFinite(zoom) ? zoom : undefined,
+        limit: Number.isFinite(limit) ? limit : undefined,
+      });
       return NextResponse.json(geojson);
     }
 

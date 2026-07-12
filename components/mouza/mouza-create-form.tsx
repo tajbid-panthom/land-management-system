@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { FileChooseField } from "@/components/ui/file-choose-field";
 
 type GeoItem = { id: string; name: string };
 type Dataset = {
@@ -185,24 +186,13 @@ export function MouzaCreateForm({
       </div>
       <div className="md:col-span-2">
         <label className="mb-1 block text-sm font-medium">Shapefile ZIP</label>
-        <div className="flex items-center gap-3 rounded-md border border-sky-200 bg-sky-50/50 p-3">
-          <label
-            htmlFor="mouza-shapefile-upload"
-            className="cursor-pointer rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800"
-          >
-            Choose ZIP
-          </label>
-          <input
-            id="mouza-shapefile-upload"
-            type="file"
-            accept=".zip,application/zip"
-            className="sr-only"
-            onChange={(e) => setDbfFileName(e.target.files?.[0]?.name ?? null)}
-          />
-          <span className="text-sm text-slate-600">
-            {dbfFileName ?? "Optional — .shp/.shx/.dbf/.prj ZIP for selected dataset"}
-          </span>
-        </div>
+        <FileChooseField
+          id="mouza-shapefile-upload"
+          accept=".zip,application/zip"
+          buttonLabel="Choose ZIP"
+          emptyLabel="Optional — .shp/.shx/.dbf/.prj ZIP for selected dataset"
+          onFileChange={(file) => setDbfFileName(file?.name ?? null)}
+        />
       </div>
       {error && <p className="md:col-span-2 text-sm text-red-600">{error}</p>}
       {success && <p className="md:col-span-2 text-sm text-teal-700">{success}</p>}

@@ -135,6 +135,7 @@ export async function listMutationCases() {
       remarks: mutationCases.remarks,
       plotNumber: landParcels.plotNumber,
       parcelId: landParcels.id,
+      mouzaId: landParcels.mouzaId,
       mouzaName: mouzas.name,
       districtName: districts.name,
       propertyId: properties.id,

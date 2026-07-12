@@ -269,6 +269,7 @@ export const propertyDocuments = pgTable(
     uploadedBy: uuid("uploaded_by")
       .references(() => users.id)
       .notNull(),
+    updatedBy: uuid("updated_by").references(() => users.id),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
     deletedAt: timestamp("deleted_at"),

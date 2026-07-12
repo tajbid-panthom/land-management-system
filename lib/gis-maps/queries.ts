@@ -8,6 +8,11 @@ import {
 } from "@/lib/db/schema";
 import { desc, eq, sql, and, ilike, or } from "drizzle-orm";
 import { deleteMapFiles } from "./storage";
+import type { MapBBox } from "./viewport";
+import {
+  defaultViewportFeatureLimit,
+  simplifyToleranceForZoom,
+} from "./viewport";
 
 export async function listMaps(limit = 50) {
   return db
@@ -91,13 +96,36 @@ export async function getLatestJobForMap(mapId: string) {
   return job ?? null;
 }
 
-export async function getLayerGeoJson(layerId: string, limit = 10000) {
+export async function getLayerGeoJson(
+  layerId: string,
+  options?: {
+    limit?: number;
+    bbox?: MapBBox;
+    zoom?: number;
+  },
+) {
+  const zoom = options?.zoom;
+  const limit =
+    options?.limit ??
+    (options?.bbox ? defaultViewportFeatureLimit(zoom) : 10000);
+  const tolerance = simplifyToleranceForZoom(zoom);
+  const bbox = options?.bbox;
+
+  const bboxFilter = bbox
+    ? sql`AND geom && ST_MakeEnvelope(${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}, 4326)
+         AND ST_Intersects(
+           geom,
+           ST_MakeEnvelope(${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}, 4326)
+         )`
+    : sql``;
+
   const stats = await db.execute<{
     total: number;
     with_geom: number;
     valid_geom: number;
     srid: number | null;
     geom_types: string | null;
+    in_viewport: number;
   }>(sql`
     SELECT
       COUNT(*)::int AS total,
@@ -105,10 +133,32 @@ export async function getLayerGeoJson(layerId: string, limit = 10000) {
       COUNT(*) FILTER (WHERE geom IS NOT NULL AND ST_IsValid(geom))::int AS valid_geom,
       MAX(ST_SRID(geom)) FILTER (WHERE geom IS NOT NULL) AS srid,
       string_agg(DISTINCT GeometryType(geom), ', ' ORDER BY GeometryType(geom))
-        FILTER (WHERE geom IS NOT NULL) AS geom_types
+        FILTER (WHERE geom IS NOT NULL) AS geom_types,
+      COUNT(*) FILTER (
+        WHERE geom IS NOT NULL
+          AND ST_IsValid(geom)
+          ${
+            bbox
+              ? sql`AND geom && ST_MakeEnvelope(${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}, 4326)
+                    AND ST_Intersects(
+                      geom,
+                      ST_MakeEnvelope(${bbox.west}, ${bbox.south}, ${bbox.east}, ${bbox.north}, 4326)
+                    )`
+              : sql``
+          }
+      )::int AS in_viewport
     FROM gis_layer_features
     WHERE layer_id = ${layerId}
   `);
+
+  const simplifyExpr =
+    tolerance > 0
+      ? sql`CASE
+          WHEN GeometryType(f.geom) IN ('POLYGON', 'MULTIPOLYGON')
+          THEN ST_SimplifyPreserveTopology(f.geom, ${tolerance})
+          ELSE f.geom
+        END`
+      : sql`f.geom`;
 
   const rows = await db.execute<{
     type: string;
@@ -121,25 +171,21 @@ export async function getLayerGeoJson(layerId: string, limit = 10000) {
         json_agg(
           json_build_object(
             'type', 'Feature',
-            'geometry', ST_AsGeoJSON(
-              CASE
-                WHEN GeometryType(f.geom) IN ('POLYGON', 'MULTIPOLYGON')
-                THEN ST_SimplifyPreserveTopology(f.geom, 0.000008)
-                ELSE f.geom
-              END
-            )::json,
-            'properties', f.properties
+            'id', f.id,
+            'geometry', ST_AsGeoJSON(${simplifyExpr})::json,
+            'properties', f.properties || jsonb_build_object('id', f.id)
           )
         ) FILTER (WHERE f.geom IS NOT NULL AND ST_IsValid(f.geom)),
         '[]'::json
       ) AS features,
       COUNT(*)::int AS feature_count
     FROM (
-      SELECT geom, properties
+      SELECT id, geom, properties
       FROM gis_layer_features
       WHERE layer_id = ${layerId}
         AND geom IS NOT NULL
         AND ST_IsValid(geom)
+        ${bboxFilter}
       ORDER BY id
       LIMIT ${limit}
     ) f
@@ -155,10 +201,16 @@ export async function getLayerGeoJson(layerId: string, limit = 10000) {
     meta: {
       returned: features.length,
       total: statRow?.total ?? row?.feature_count ?? 0,
+      inViewport: statRow?.in_viewport ?? features.length,
       withGeometry: statRow?.with_geom ?? 0,
       validGeometry: statRow?.valid_geom ?? 0,
       srid: statRow?.srid ?? null,
       geometryTypes: statRow?.geom_types ?? null,
+      truncated:
+        (statRow?.in_viewport ?? 0) > features.length ||
+        (!bbox && (statRow?.total ?? 0) > features.length),
+      bbox: bbox ?? null,
+      zoom: zoom ?? null,
     },
   };
 }

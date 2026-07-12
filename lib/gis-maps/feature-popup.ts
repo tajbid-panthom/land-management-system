@@ -10,6 +10,12 @@ export type PopupSection = {
   rows: PopupRow[];
 };
 
+export type PropertyDocumentRef = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+} | null;
+
 export type MouzaPopupDetail = {
   id?: string;
   plotNo?: string | null;
@@ -35,6 +41,8 @@ export type MouzaPopupDetail = {
   syncMessage?: string | null;
   featureId?: string | null;
   parcelId?: string | null;
+  propertyId?: string | null;
+  propertyCode?: string | null;
   geometry?: Geometry | null;
   coordinates?: string | null;
   khatianNumbers?: string | null;
@@ -45,6 +53,8 @@ export type MouzaPopupDetail = {
   registrationDate?: string | null;
   mutationStatus?: string | null;
   courtCaseStatus?: string | null;
+  registrationDeed?: PropertyDocumentRef;
+  mutationCertificate?: PropertyDocumentRef;
 };
 
 function compactRows(rows: PopupRow[]): PopupRow[] {
@@ -61,6 +71,7 @@ export function buildMouzaPopupSections(detail: MouzaPopupDetail): PopupSection[
     {
       title: "Property Information",
       rows: compactRows([
+        { label: "Property Code", value: detail.propertyCode },
         { label: "Plot (Dag) Number", value: detail.plotNo },
         { label: "Khatian Number", value: detail.khatianNumbers },
         { label: "Mouza", value: detail.mauza },
@@ -116,6 +127,57 @@ export function buildMouzaPopupSections(detail: MouzaPopupDetail): PopupSection[
   ];
 
   return sections.filter((section) => section.rows.length > 0);
+}
+
+export type PropertyDocumentAction = {
+  kind: "registration_deed" | "mutation_certificate";
+  label: string;
+  available: boolean;
+  documentId?: string;
+  fileName?: string;
+  propertyId?: string | null;
+  /** When PDF is missing, deep-link to upload on the property documents page. */
+  uploadHref?: string | null;
+  hint?: string | null;
+};
+
+export function buildPropertyDocumentActions(
+  detail: MouzaPopupDetail,
+): PropertyDocumentAction[] {
+  const docsHref = detail.propertyId
+    ? `/dashboard/properties/${detail.propertyId}/documents`
+    : null;
+
+  return [
+    {
+      kind: "registration_deed",
+      label: "Registration Deed",
+      available: Boolean(detail.registrationDeed?.id && detail.propertyId),
+      documentId: detail.registrationDeed?.id,
+      fileName: detail.registrationDeed?.fileName,
+      propertyId: detail.propertyId,
+      uploadHref: docsHref,
+      hint: detail.propertyId
+        ? detail.registrationDeed
+          ? null
+          : "No PDF uploaded yet — upload on the property documents page"
+        : "Create or link a property first to attach documents",
+    },
+    {
+      kind: "mutation_certificate",
+      label: "Mutation Certificate",
+      available: Boolean(detail.mutationCertificate?.id && detail.propertyId),
+      documentId: detail.mutationCertificate?.id,
+      fileName: detail.mutationCertificate?.fileName,
+      propertyId: detail.propertyId,
+      uploadHref: docsHref,
+      hint: detail.propertyId
+        ? detail.mutationCertificate
+          ? null
+          : "No PDF uploaded yet — upload on the property documents page"
+        : "Create or link a property first to attach documents",
+    },
+  ];
 }
 
 export function buildGisLayerPopupSections(input: {

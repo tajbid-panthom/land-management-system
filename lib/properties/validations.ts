@@ -36,14 +36,14 @@ export const paginationSchema = z.object({
 });
 
 export const propertyLocationSchema = z.object({
-  divisionId: z.string().uuid().optional(),
-  districtId: z.string().uuid().optional(),
-  upazilaId: z.string().uuid().optional(),
+  divisionId: z.string().uuid("Division is required"),
+  districtId: z.string().uuid("District is required"),
+  upazilaId: z.string().uuid("Upazila / Thana is required"),
   unionId: z.string().uuid().optional(),
-  mouzaId: z.string().uuid(),
+  mouzaId: z.string().uuid("Mouza is required"),
   mouzaName: z.string().max(100).optional(),
-  jlNumber: z.string().max(20).optional(),
-  plotNumber: z.string().min(1).max(30),
+  jlNumber: z.string().min(1, "JL Number is required").max(20),
+  plotNumber: z.string().min(1, "Plot Number is required").max(30),
   khatianCs: z.string().max(30).optional(),
   khatianSa: z.string().max(30).optional(),
   khatianRs: z.string().max(30).optional(),
@@ -54,6 +54,17 @@ export const propertyLocationSchema = z.object({
   areaSqft: z.string().optional(),
   areaValue: z.string().min(1),
   areaUnit: areaUnitSchema,
+});
+
+export const ownerInputSchema = z.object({
+  fullName: z.string().min(1).max(150),
+  nid: nidSchema.optional(),
+  dateOfBirth: z.string().date().optional(),
+  fatherOrHusbandName: z.string().max(150).optional(),
+  motherName: z.string().max(150).optional(),
+  phone: phoneSchema.optional(),
+  email: emailSchema.optional(),
+  sharePercentage: z.coerce.number().min(0).max(100),
 });
 
 export const createPropertySchema = z.object({
@@ -69,6 +80,7 @@ export const createPropertySchema = z.object({
       litigationStatus: z.string().max(50).optional(),
     })
     .optional(),
+  owner: ownerInputSchema,
 });
 
 export const updatePropertySchema = z.object({
@@ -106,17 +118,6 @@ export const deedUpdateSchema = z.object({
   namjariStatus: z.string().max(30).optional(),
   powerOfAttorney: z.string().optional(),
   litigationStatus: z.string().max(50).optional(),
-});
-
-export const ownerInputSchema = z.object({
-  fullName: z.string().min(1).max(150),
-  nid: nidSchema.optional(),
-  dateOfBirth: z.string().date().optional(),
-  fatherOrHusbandName: z.string().max(150).optional(),
-  motherName: z.string().max(150).optional(),
-  phone: phoneSchema.optional(),
-  email: emailSchema.optional(),
-  sharePercentage: z.coerce.number().min(0).max(100),
 });
 
 export const coOwnerInputSchema = z.object({

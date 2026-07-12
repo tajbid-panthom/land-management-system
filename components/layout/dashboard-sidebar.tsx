@@ -9,6 +9,7 @@ const profileLink = { href: "/dashboard/profile", label: "My Profile" };
 
 const adminLinks = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard/analytics", label: "Analytics" },
   { href: "/dashboard/properties", label: "Properties" },
   { href: "/dashboard/owners", label: "Owners" },
   { href: "/dashboard/deeds", label: "Registered Deeds" },

@@ -21,7 +21,12 @@ const PERMISSIONS: Record<PropertyAction, Role[]> = {
   edit: ["super_admin", "land_officer", "legal_officer"],
   delete: ["super_admin", "land_officer"],
   restore: ["super_admin", "land_officer"],
-  upload_documents: ["super_admin", "land_officer", "legal_officer"],
+  upload_documents: [
+    "super_admin",
+    "land_officer",
+    "legal_officer",
+    "property_owner",
+  ],
   update_deed: ["super_admin", "land_officer", "legal_officer"],
   update_ownership: ["super_admin", "land_officer", "property_owner"],
   view_ownership: ["super_admin", "land_officer", "legal_officer", "property_owner"],
@@ -70,7 +75,7 @@ export function canEditPropertySection(
   if (isPropertyAdmin(role)) return true;
 
   if (isPropertyOwner(role)) {
-    return section === "ownership";
+    return section === "ownership" || section === "documents";
   }
 
   if (section === "profile" || section === "documents") {

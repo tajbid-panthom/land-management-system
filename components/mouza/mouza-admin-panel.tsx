@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { MouzaMapView } from "./mouza-map-view";
+import { FileChooseField } from "@/components/ui/file-choose-field";
 
 type Dataset = {
   id: string;
@@ -358,18 +359,17 @@ export function MouzaAdminPanel() {
             <form onSubmit={handleShapefileUpload} className="space-y-4">
               <div>
                 <label className="mb-1 block text-sm font-medium">Shapefile ZIP</label>
-                <input
+                <FileChooseField
                   name="gisFile"
-                  type="file"
                   accept=".zip,application/zip,application/octet-stream"
-                  className="w-full max-w-md text-sm"
-                  required
+                  buttonLabel="Choose ZIP"
+                  emptyLabel="Select a shapefile ZIP to upload"
                 />
               </div>
               <button
                 type="submit"
                 disabled={loading}
-                className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-800 disabled:opacity-50"
+                className="rounded-md border border-teal-800 bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
               >
                 {loading ? "Uploading & mapping..." : "Upload & Sync"}
               </button>

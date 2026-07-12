@@ -15,9 +15,13 @@
 #   NEXTAUTH_URL
 #   NEXTAUTH_SECRET
 #   ENCRYPTION_KEY
-#   CLOUDINARY_* / R2_* / NEXT_PUBLIC_MAPTILER_KEY
+#   CLOUDINARY_* / R2_* / NEXT_PUBLIC_MAPTILER_KEY / NEXT_PUBLIC_APP_URL
 #
-# After deploy, seed from Coolify app Terminal:
+# NEXT_PUBLIC_* are baked in at Docker build time. Set them before rebuild
+# (Coolify usually passes env vars as build args automatically).
+#
+# After deploy, migrate then seed from Coolify app Terminal:
+#   pnpm db:migrate
 #   ./node_modules/.bin/tsx lib/db/seed.ts
 #   # or:
 #   pnpm db:seed

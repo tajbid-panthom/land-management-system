@@ -74,6 +74,13 @@ export const SAMPLE_GEOGRAPHY = [
     mouza: { name: "Baipail", jlNumber: "JL-1042" },
   },
   {
+    district: "Dhaka",
+    districtCode: "BD-DHK-DHA",
+    upazila: { name: "Gulshan", code: "BD-DHK-GUL" },
+    union: { name: "Meradia", type: "union", code: "BD-DHK-GUL-MER" },
+    mouza: { name: "Uttar Meradia", jlNumber: "JL-2785" },
+  },
+  {
     district: "Chattogram",
     districtCode: "BD-CTG-CTG",
     upazila: { name: "Sitakunda", code: "BD-CTG-SIT" },
