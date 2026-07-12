@@ -20,10 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PYTHONUNBUFFERED=1
-# Prefer venv python so `spawn("python3")` finds geopandas
-ENV PATH="/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ENV PNPM_HOME="/pnpm"
-ENV PATH="/opt/venv/bin:$PNPM_HOME:$PATH"
+# Prefer venv python so `spawn("python3")` finds geopandas
+ENV PATH="/opt/venv/bin:$PNPM_HOME:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 WORKDIR /app
 
@@ -49,7 +48,6 @@ COPY --from=deps /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml 
 
 COPY . .
 
-# pnpm needs a reinstall after full source copy (workspace + symlink integrity)
 RUN pnpm install --frozen-lockfile
 
 # Placeholders only for build; Coolify injects real values at runtime
@@ -67,13 +65,19 @@ RUN groupadd --system --gid 1001 nodejs \
 
 COPY --from=deps /opt/venv /opt/venv
 
+# Next.js standalone app
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Needed for GIS import (spawn python3 .../python/process_mpk.py)
+# Full deps so Coolify terminal can run seed (tsx + drizzle + pg, etc.)
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+
+# Source needed for db:seed / GIS processing
+COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/python ./python
-COPY --from=builder /app/lib/db/migrations ./lib/db/migrations
+COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 
 RUN mkdir -p /app/uploads \
   && chown -R nextjs:nodejs /app

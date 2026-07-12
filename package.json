@@ -41,6 +41,8 @@
     "shapefile": "^0.6.6",
     "sonner": "^2.0.7",
     "sql.js": "^1.14.1",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.0",
     "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
@@ -52,12 +54,10 @@
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "dotenv": "^17.4.2",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
-    "tsx": "^4.23.0",
     "typescript": "^5"
   }
 }

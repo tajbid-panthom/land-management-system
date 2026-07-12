@@ -38,6 +38,9 @@ importers:
       dbffile:
         specifier: ^1.12.0
         version: 1.12.0
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)(postgres@3.4.9)(sql.js@1.14.1)
@@ -86,6 +89,9 @@ importers:
       sql.js:
         specifier: ^1.14.1
         version: 1.14.1
+      tsx:
+        specifier: ^4.23.0
+        version: 4.23.0
       xlsx:
         specifier: ^0.18.5
         version: 0.18.5
@@ -114,9 +120,6 @@ importers:
       '@types/react-dom':
         specifier: ^19
         version: 19.2.3(@types/react@19.2.17)
-      dotenv:
-        specifier: ^17.4.2
-        version: 17.4.2
       drizzle-kit:
         specifier: ^0.31.10
         version: 0.31.10
@@ -129,9 +132,6 @@ importers:
       tailwindcss:
         specifier: ^4
         version: 4.3.2
-      tsx:
-        specifier: ^4.23.0
-        version: 4.23.0
       typescript:
         specifier: ^5
         version: 5.9.3

@@ -17,5 +17,10 @@
 #   ENCRYPTION_KEY
 #   CLOUDINARY_* / R2_* / NEXT_PUBLIC_MAPTILER_KEY
 #
+# After deploy, seed from Coolify app Terminal:
+#   ./node_modules/.bin/tsx lib/db/seed.ts
+#   # or:
+#   pnpm db:seed
+#
 # NEXTAUTH_URL example for Coolify sslip domain:
 #   https://zgcajcn2c7xvrihm6dy2u286.193.203.163.46.sslip.io
