@@ -22,15 +22,17 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PYTHONUNBUFFERED=1
 # Prefer venv python so `spawn("python3")` finds geopandas
 ENV PATH="/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ENV PNPM_HOME="/pnpm"
+ENV PATH="/opt/venv/bin:$PNPM_HOME:$PATH"
 
 WORKDIR /app
 
-# ---- Dependencies ----
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
+
+# ---- Dependencies + Python venv ----
 FROM base AS deps
 
-RUN corepack enable && corepack prepare pnpm@9 --activate
-
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY python/requirements.txt /tmp/requirements.txt
@@ -41,18 +43,21 @@ RUN python3 -m venv /opt/venv \
 # ---- Build Next.js ----
 FROM base AS builder
 
-RUN corepack enable && corepack prepare pnpm@9 --activate
-
-COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /opt/venv /opt/venv
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+
 COPY . .
+
+# pnpm needs a reinstall after full source copy (workspace + symlink integrity)
+RUN pnpm install --frozen-lockfile
 
 # Placeholders only for build; Coolify injects real values at runtime
 ENV DATABASE_URL="postgresql://build:build@localhost:5432/build"
 ENV NEXTAUTH_SECRET="build-time-secret-placeholder"
 ENV ENCRYPTION_KEY="build-time-encryption-key-placeholder"
 
-RUN pnpm build
+RUN pnpm run build
 
 # ---- Production runner ----
 FROM base AS runner

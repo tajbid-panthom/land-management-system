@@ -160,7 +160,7 @@ export async function POST(request: NextRequest) {
 
     if (parsed.hasGeometry) {
       const repaired = await fixWrongUtmZoneGeometries(datasetId);
-      if (repaired.featureCount > 0 || repaired.parcelCount > 0) {
+      if ((repaired.featureCount ?? 0) > 0 || (repaired.parcelCount ?? 0) > 0) {
         console.info(
           `[mouza-gis/dbf] repaired UTM zone geometries: ${repaired.featureCount} features, ${repaired.parcelCount} parcels`,
         );
