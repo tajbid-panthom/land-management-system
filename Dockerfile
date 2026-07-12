@@ -79,10 +79,13 @@ COPY --from=builder /app/lib ./lib
 COPY --from=builder /app/python ./python
 COPY --from=builder /app/drizzle.config.ts ./drizzle.config.ts
 
-RUN mkdir -p /app/uploads \
-  && chown -R nextjs:nodejs /app
+RUN mkdir -p /app/uploads /app/.cache/corepack /home/nextjs \
+  && chown -R nextjs:nodejs /app /home/nextjs
 
 USER nextjs
+
+ENV COREPACK_HOME=/app/.cache/corepack
+ENV HOME=/home/nextjs
 
 EXPOSE 3000
 ENV PORT=3000
