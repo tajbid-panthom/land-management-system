@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { eq, ilike, and, inArray } from "drizzle-orm";
+import { eq, ilike, and, inArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   landParcels,
@@ -8,6 +8,7 @@ import {
   upazilas,
   districts,
   khatians,
+  properties,
 } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { canEditParcels } from "@/lib/auth/rbac";
@@ -78,6 +79,7 @@ export async function GET(request: NextRequest) {
     conditions.push(inArray(landParcels.id, parcelIds));
   }
 
+  // Prefer upazila via mouza.upazila_id (GIS-created mouzas often have no union).
   const results = await db
     .select({
       id: landParcels.id,
@@ -85,17 +87,32 @@ export async function GET(request: NextRequest) {
       areaValue: landParcels.areaValue,
       areaUnit: landParcels.areaUnit,
       status: landParcels.status,
+      mouzaId: landParcels.mouzaId,
       mouzaName: mouzas.name,
       jlNumber: mouzas.jlNumber,
       unionName: unions.name,
       upazilaName: upazilas.name,
       districtName: districts.name,
+      propertyId: properties.id,
+      propertyCode: properties.propertyCode,
+      lng: sql<number | null>`ST_X(ST_Centroid(${landParcels.boundary}))`,
+      lat: sql<number | null>`ST_Y(ST_Centroid(${landParcels.boundary}))`,
     })
     .from(landParcels)
     .innerJoin(mouzas, eq(landParcels.mouzaId, mouzas.id))
-    .innerJoin(unions, eq(mouzas.unionId, unions.id))
-    .innerJoin(upazilas, eq(unions.upazilaId, upazilas.id))
-    .innerJoin(districts, eq(upazilas.districtId, districts.id))
+    .leftJoin(unions, eq(mouzas.unionId, unions.id))
+    .leftJoin(
+      upazilas,
+      sql`${upazilas.id} = COALESCE(${mouzas.upazilaId}, ${unions.upazilaId})`,
+    )
+    .leftJoin(districts, eq(upazilas.districtId, districts.id))
+    .leftJoin(
+      properties,
+      and(
+        eq(properties.parcelId, landParcels.id),
+        sql`${properties.deletedAt} IS NULL`,
+      ),
+    )
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .limit(50);
 
@@ -134,8 +151,6 @@ export async function POST(request: NextRequest) {
     entityTable: "land_parcels",
     entityId: parcel.id,
     newValue: parcel as unknown as Record<string, unknown>,
-    ipAddress:
-      request.headers.get("x-forwarded-for")?.split(",")[0] ?? undefined,
   });
 
   return NextResponse.json({ parcel }, { status: 201 });

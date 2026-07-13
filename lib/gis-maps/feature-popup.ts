@@ -66,14 +66,21 @@ function formatArea(value: string | null | undefined, unit?: string | null) {
   return unit ? `${value} ${unit}` : value;
 }
 
-export function buildMouzaPopupSections(detail: MouzaPopupDetail): PopupSection[] {
+export function buildMouzaPopupSections(
+  detail: MouzaPopupDetail,
+  options?: { includeSensitive?: boolean },
+): PopupSection[] {
+  const includeSensitive = options?.includeSensitive !== false;
   const sections: PopupSection[] = [
     {
       title: "Property Information",
       rows: compactRows([
         { label: "Property Code", value: detail.propertyCode },
         { label: "Plot (Dag) Number", value: detail.plotNo },
-        { label: "Khatian Number", value: detail.khatianNumbers },
+        {
+          label: "Khatian Number",
+          value: includeSensitive ? detail.khatianNumbers : null,
+        },
         { label: "Mouza", value: detail.mauza },
         { label: "JL Number", value: detail.jlNo },
         { label: "District", value: detail.mDistrict },
@@ -83,7 +90,10 @@ export function buildMouzaPopupSections(detail: MouzaPopupDetail): PopupSection[
         { label: "Land Class", value: detail.landClass },
         { label: "Area", value: formatArea(detail.mAcres, "acres") },
         { label: "Khas Area", value: detail.khasArea },
-        { label: "Boundary Length", value: detail.boundaryLength ?? detail.shapeLeng },
+        {
+          label: "Boundary Length",
+          value: detail.boundaryLength ?? detail.shapeLeng,
+        },
         { label: "Revenue Number", value: detail.revenueNo },
         { label: "Project", value: detail.project },
         { label: "Sheet Number", value: detail.sheetNo },
@@ -92,39 +102,48 @@ export function buildMouzaPopupSections(detail: MouzaPopupDetail): PopupSection[
         { label: "Preparation Date", value: detail.prepDate },
       ]),
     },
-    {
-      title: "Ownership Information",
-      rows: compactRows([
-        { label: "Current Owner(s)", value: detail.currentOwners },
-        { label: "Ownership Status", value: detail.ownershipStatus },
-        {
-          label: "Number of Owners",
-          value:
-            detail.ownerCount != null && detail.ownerCount > 0
-              ? String(detail.ownerCount)
-              : null,
-        },
-      ]),
-    },
-    {
-      title: "Registration Information",
-      rows: compactRows([
-        { label: "Registered Deed Number", value: detail.registeredDeedNumber },
-        { label: "Registration Date", value: detail.registrationDate },
-        { label: "Mutation Status", value: detail.mutationStatus },
-        { label: "Court Case Status", value: detail.courtCaseStatus },
-      ]),
-    },
-    {
-      title: "GIS Information",
-      rows: compactRows([
-        { label: "Geometry Type", value: detail.geometry?.type },
-        { label: "Coordinates", value: detail.coordinates },
-        { label: "Feature ID", value: detail.featureId ?? detail.id },
-        { label: "Sync Status", value: detail.syncStatus },
-      ]),
-    },
   ];
+
+  if (includeSensitive) {
+    sections.push(
+      {
+        title: "Ownership Information",
+        rows: compactRows([
+          { label: "Current Owner(s)", value: detail.currentOwners },
+          { label: "Ownership Status", value: detail.ownershipStatus },
+          {
+            label: "Number of Owners",
+            value:
+              detail.ownerCount != null && detail.ownerCount > 0
+                ? String(detail.ownerCount)
+                : null,
+          },
+        ]),
+      },
+      {
+        title: "Registration Information",
+        rows: compactRows([
+          {
+            label: "Registered Deed Number",
+            value: detail.registeredDeedNumber,
+          },
+          { label: "Registration Date", value: detail.registrationDate },
+          { label: "Mutation Status", value: detail.mutationStatus },
+          { label: "Court Case Status", value: detail.courtCaseStatus },
+        ]),
+      },
+    );
+  }
+
+  sections.push({
+    title: "GIS Information",
+    rows: compactRows([
+      { label: "Geometry Type", value: detail.geometry?.type },
+      { label: "Coordinates", value: detail.coordinates },
+      { label: "Feature ID", value: detail.featureId ?? detail.id },
+      { label: "Sync Status", value: detail.syncStatus },
+    ]),
+  });
 
   return sections.filter((section) => section.rows.length > 0);
 }

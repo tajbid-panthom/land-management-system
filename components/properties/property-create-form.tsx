@@ -96,7 +96,7 @@ async function uploadDocument(
 export function PropertyCreateForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const prefillApplied = useRef(false);
+  const prefillKeyRef = useRef<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [prefillLoading, setPrefillLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,21 +128,54 @@ export function PropertyCreateForm() {
   }, []);
 
   useEffect(() => {
-    if (prefillApplied.current) return;
     const fromGis = searchParams.get("fromGis") === "1";
     const district = searchParams.get("district");
     const upazila = searchParams.get("upazila");
     const mouza = searchParams.get("mouza");
     const plotNo = searchParams.get("plotNo");
     const jlNo = searchParams.get("jlNo");
+    const mCode = searchParams.get("mCode");
     const area = searchParams.get("areaValue");
     const unit = searchParams.get("areaUnit");
+    const prefillKey = searchParams.toString();
 
     if (!fromGis && !district && !upazila && !mouza && !plotNo) return;
-    prefillApplied.current = true;
+    // Avoid React Strict Mode double-mount skipping the real prefill run.
+    if (prefillKeyRef.current === prefillKey) return;
 
     let cancelled = false;
     setPrefillLoading(true);
+    setError(null);
+
+    // Show map attributes immediately while geography UUIDs resolve.
+    if (plotNo) setPlotNumber(plotNo);
+    if (jlNo) setJlNumber(jlNo);
+    if (area) {
+      setAreaValue(area);
+      setAreaUnit(unit || "acre");
+    } else if (fromGis) {
+      setAreaValue("0.01");
+      setAreaUnit(unit || "acre");
+    }
+    setPrefillNotice(
+      [
+        district,
+        upazila,
+        mouza,
+        plotNo ? `Plot ${plotNo}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+        ? `Loading GIS plot into property form: ${[
+            district,
+            upazila,
+            mouza,
+            plotNo ? `Plot ${plotNo}` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}…`
+        : "Opened from GIS map. Resolving location…",
+    );
 
     (async () => {
       try {
@@ -150,8 +183,14 @@ export function PropertyCreateForm() {
         if (district) params.set("district", district);
         if (upazila) params.set("upazila", upazila);
         if (mouza) params.set("mouza", mouza);
+        if (jlNo) params.set("jlNumber", jlNo);
+        if (mCode) params.set("mCode", mCode);
+        if (fromGis) params.set("ensure", "1");
 
         const resolveRes = await fetch(`/api/geography?${params}`);
+        if (!resolveRes.ok) {
+          throw new Error("Geography resolve failed");
+        }
         const resolved = await resolveRes.json();
         if (cancelled) return;
 
@@ -172,6 +211,16 @@ export function PropertyCreateForm() {
             resolved.districtId,
           )) as GeoItem[];
           if (cancelled) return;
+          // Ensure newly created GIS thana appears in the dropdown.
+          if (
+            resolved.upazilaId &&
+            !upazilaItems.some((u) => u.id === resolved.upazilaId)
+          ) {
+            upazilaItems.unshift({
+              id: resolved.upazilaId,
+              name: resolved.upazilaName ?? upazila ?? "GIS Upazila",
+            });
+          }
           setUpazilas(upazilaItems);
         }
 
@@ -183,9 +232,25 @@ export function PropertyCreateForm() {
           ]);
           if (cancelled) return;
           setUnions(unionItems as GeoItem[]);
-          setMouzas(mouzaItems as MouzaOption[]);
+
+          let nextMouzas = mouzaItems as MouzaOption[];
+          if (
+            resolved.mouzaId &&
+            !nextMouzas.some((m) => m.id === resolved.mouzaId)
+          ) {
+            nextMouzas = [
+              {
+                id: resolved.mouzaId,
+                name: resolved.mouzaName ?? mouza ?? "GIS Mouza",
+                jlNumber: resolved.jlNumber ?? jlNo,
+              },
+              ...nextMouzas,
+            ];
+          }
+          setMouzas(nextMouzas);
         }
 
+        // Only narrow by union when it actually returns the resolved mouza.
         if (resolved.unionId) {
           setUnionId(resolved.unionId);
           const mouzaItems = (await loadGeo(
@@ -193,7 +258,26 @@ export function PropertyCreateForm() {
             resolved.unionId,
           )) as MouzaOption[];
           if (cancelled) return;
-          setMouzas(mouzaItems);
+          const hasResolved =
+            !resolved.mouzaId ||
+            mouzaItems.some((m) => m.id === resolved.mouzaId);
+          if (hasResolved && mouzaItems.length > 0) {
+            let nextMouzas = mouzaItems;
+            if (
+              resolved.mouzaId &&
+              !nextMouzas.some((m) => m.id === resolved.mouzaId)
+            ) {
+              nextMouzas = [
+                {
+                  id: resolved.mouzaId,
+                  name: resolved.mouzaName ?? mouza ?? "GIS Mouza",
+                  jlNumber: resolved.jlNumber ?? jlNo,
+                },
+                ...nextMouzas,
+              ];
+            }
+            setMouzas(nextMouzas);
+          }
         }
 
         if (resolved.mouzaId) {
@@ -208,28 +292,42 @@ export function PropertyCreateForm() {
 
         setJlNumber(jlNo || resolved.jlNumber || "");
         if (plotNo) setPlotNumber(plotNo);
-        if (area) setAreaValue(area);
-        if (unit) setAreaUnit(unit);
+        if (area) {
+          setAreaValue(area);
+          setAreaUnit(unit || "acre");
+        } else if (fromGis) {
+          setAreaValue((prev) => prev || "0.01");
+          setAreaUnit(unit || "acre");
+        }
 
         const bits = [
-          resolved.districtName,
-          resolved.upazilaName,
-          resolved.mouzaName,
+          resolved.districtName ?? district,
+          resolved.upazilaName ?? upazila,
+          resolved.mouzaName ?? mouza,
           plotNo ? `Plot ${plotNo}` : null,
         ].filter(Boolean);
-        setPrefillNotice(
-          bits.length > 0
-            ? `Prefilled from GIS plot: ${bits.join(" · ")}. Upload Registration Deed and Mutation PDFs below so they appear on the map.`
-            : "Opened from GIS map. Complete location fields and upload documents.",
-        );
+        const ensuredBits = [
+          resolved.ensured?.upazila ? "upazila created" : null,
+          resolved.ensured?.mouza ? "mouza created" : null,
+        ].filter(Boolean);
+
+        if (!resolved.mouzaId || !resolved.upazilaId || !resolved.districtId) {
+          setPrefillNotice(
+            `GIS values loaded (${bits.join(" · ") || "partial"}), but some location IDs could not be resolved. Complete any empty dropdowns before saving.`,
+          );
+        } else {
+          setPrefillNotice(
+            `Prefilled from GIS plot: ${bits.join(" · ")}${
+              ensuredBits.length ? ` (${ensuredBits.join(", ")})` : ""
+            }. Add owner details and upload documents if needed.`,
+          );
+        }
+
+        prefillKeyRef.current = prefillKey;
       } catch {
         if (!cancelled) {
-          if (plotNo) setPlotNumber(plotNo);
-          if (jlNo) setJlNumber(jlNo);
-          if (area) setAreaValue(area);
-          if (unit) setAreaUnit(unit);
           setPrefillNotice(
-            "Opened from GIS map, but geography IDs could not be resolved automatically. Select location fields manually.",
+            "Opened from GIS map, but geography IDs could not be resolved automatically. Plot/area from the map are filled — select remaining location fields manually.",
           );
         }
       } finally {
@@ -384,7 +482,7 @@ export function PropertyCreateForm() {
         unionId: unionId || undefined,
         mouzaId,
         plotNumber,
-        areaValue: form.get("areaValue") || areaValue,
+        areaValue: String(form.get("areaValue") || areaValue || "").trim(),
         areaUnit: form.get("areaUnit") || areaUnit,
         mouzaName: selectedMouza?.name,
         jlNumber,
@@ -409,6 +507,8 @@ export function PropertyCreateForm() {
             registrationDate: form.get("registrationDate"),
           }
         : undefined,
+      featureId: searchParams.get("featureId") || undefined,
+      mapId: searchParams.get("mapId") || undefined,
     };
 
     const res = await fetch("/api/properties", {
@@ -418,8 +518,15 @@ export function PropertyCreateForm() {
     });
 
     if (!res.ok) {
-      const data = await res.json();
-      setError(data.error ?? "Failed to create property");
+      const data = await res.json().catch(() => ({}));
+      const detailMsg =
+        data?.details?.fieldErrors &&
+        Object.entries(data.details.fieldErrors as Record<string, string[]>)
+          .flatMap(([key, msgs]) =>
+            (msgs ?? []).map((m) => `${key}: ${m}`),
+          )
+          .join("; ");
+      setError(data.error ?? detailMsg ?? "Failed to create property");
       setLoading(false);
       return;
     }

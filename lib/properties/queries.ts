@@ -555,15 +555,19 @@ export async function createPropertyWithParcel(
       email?: string;
       sharePercentage: number;
     };
+    featureId?: string;
   },
   userId: string,
 ) {
   const sequence = await getNextPropertySequence();
   const propertyCode = generatePropertyCode(sequence);
-  const areas = convertAreaToAllUnits(
-    parseFloat(input.location.areaValue),
-    input.location.areaUnit,
-  );
+  const areaNumber = parseFloat(input.location.areaValue);
+  if (!Number.isFinite(areaNumber) || areaNumber <= 0) {
+    throw new Error("Area value must be a positive number");
+  }
+  // land_parcels.area_value is numeric(12,4)
+  const normalizedArea = Math.max(areaNumber, 0.0001).toFixed(4);
+  const areas = convertAreaToAllUnits(areaNumber, input.location.areaUnit);
 
   return db.transaction(async (tx) => {
     const [parcel] = await tx
@@ -571,11 +575,26 @@ export async function createPropertyWithParcel(
       .values({
         mouzaId: input.location.mouzaId,
         plotNumber: input.location.plotNumber,
-        areaValue: input.location.areaValue,
+        areaValue: normalizedArea,
         areaUnit: input.location.areaUnit,
         status: input.status ?? "active",
       })
       .returning();
+
+    if (input.featureId) {
+      await tx.execute(sql`
+        UPDATE land_parcels
+        SET boundary = (
+          SELECT geom FROM gis_layer_features
+          WHERE id = ${input.featureId}::uuid
+            AND geom IS NOT NULL
+            AND ST_IsValid(geom)
+          LIMIT 1
+        ),
+        updated_at = NOW()
+        WHERE id = ${parcel.id}::uuid
+      `);
+    }
 
     const khatianEntries = [
       { type: "CS" as const, number: input.location.khatianCs },

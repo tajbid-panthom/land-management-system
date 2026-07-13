@@ -10,6 +10,15 @@ const phoneSchema = z
 
 const emailSchema = z.string().email("Invalid email address");
 
+/** Treat blank strings from forms as omitted optional fields. */
+function optionalBlank<T extends z.ZodTypeAny>(schema: T) {
+  return z.preprocess((value) => {
+    if (value == null) return undefined;
+    if (typeof value === "string" && value.trim() === "") return undefined;
+    return value;
+  }, schema.optional());
+}
+
 export const areaUnitSchema = z.enum([
   "decimal",
   "acre",
@@ -58,12 +67,12 @@ export const propertyLocationSchema = z.object({
 
 export const ownerInputSchema = z.object({
   fullName: z.string().min(1).max(150),
-  nid: nidSchema.optional(),
-  dateOfBirth: z.string().date().optional(),
-  fatherOrHusbandName: z.string().max(150).optional(),
-  motherName: z.string().max(150).optional(),
-  phone: phoneSchema.optional(),
-  email: emailSchema.optional(),
+  nid: optionalBlank(nidSchema),
+  dateOfBirth: optionalBlank(z.string().date()),
+  fatherOrHusbandName: optionalBlank(z.string().max(150)),
+  motherName: optionalBlank(z.string().max(150)),
+  phone: optionalBlank(phoneSchema),
+  email: optionalBlank(emailSchema),
   sharePercentage: z.coerce.number().min(0).max(100),
 });
 
@@ -81,6 +90,25 @@ export const createPropertySchema = z.object({
     })
     .optional(),
   owner: ownerInputSchema,
+  /** GIS layer feature to copy boundary from when creating from map. */
+  featureId: z.preprocess((value) => {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      trimmed,
+    )
+      ? trimmed
+      : undefined;
+  }, z.string().uuid().optional()),
+  mapId: z.preprocess((value) => {
+    if (typeof value !== "string") return undefined;
+    const trimmed = value.trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      trimmed,
+    )
+      ? trimmed
+      : undefined;
+  }, z.string().uuid().optional()),
 });
 
 export const updatePropertySchema = z.object({

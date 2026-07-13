@@ -58,30 +58,41 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const parsed = createPropertySchema.safeParse(body);
   if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0];
+    const message = firstIssue
+      ? `${firstIssue.path.join(".") || "input"}: ${firstIssue.message}`
+      : "Invalid input";
     return NextResponse.json(
-      { error: "Invalid input", details: parsed.error.flatten() },
+      { error: message, details: parsed.error.flatten() },
       { status: 400 },
     );
   }
 
-  const property = await createPropertyWithParcel(
-    {
-      status: parsed.data.status,
-      location: parsed.data.location,
-      deed: parsed.data.deed,
-      owner: parsed.data.owner,
-    },
-    session.user.id,
-  );
+  try {
+    const property = await createPropertyWithParcel(
+      {
+        status: parsed.data.status,
+        location: parsed.data.location,
+        deed: parsed.data.deed,
+        owner: parsed.data.owner,
+        featureId: parsed.data.featureId,
+      },
+      session.user.id,
+    );
 
-  await writeAuditLog({
-    actorUserId: session.user.id,
-    action: "create",
-    entityTable: "properties",
-    entityId: property.id,
-    newValue: property as unknown as Record<string, unknown>,
-    ipAddress: clientIp(request),
-  });
+    await writeAuditLog({
+      actorUserId: session.user.id,
+      action: "create",
+      entityTable: "properties",
+      entityId: property.id,
+      newValue: property as unknown as Record<string, unknown>,
+      ipAddress: clientIp(request),
+    });
 
-  return NextResponse.json({ property }, { status: 201 });
+    return NextResponse.json({ property }, { status: 201 });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to create property";
+    return NextResponse.json({ error: message }, { status: 400 });
+  }
 }

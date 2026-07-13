@@ -158,9 +158,12 @@ export async function POST(
     sharePercentage: ownerInput.sharePercentage ?? 100,
   });
   if (!ownerParsed.success) {
+    const firstIssue = ownerParsed.error.issues[0];
     return NextResponse.json(
       {
-        error: "Invalid owner details",
+        error: firstIssue
+          ? `Owner ${firstIssue.path.join(".") || "details"}: ${firstIssue.message}`
+          : "Invalid owner details",
         details: ownerParsed.error.flatten(),
       },
       { status: 400 },

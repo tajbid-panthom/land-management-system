@@ -13,6 +13,11 @@ export async function GET(request: NextRequest) {
       const districtName = searchParams.get("district")?.trim();
       const upazilaName = searchParams.get("upazila")?.trim();
       const mouzaName = searchParams.get("mouza")?.trim();
+      const jlNumber = searchParams.get("jlNumber")?.trim();
+      const mCode = searchParams.get("mCode")?.trim();
+      const ensure =
+        searchParams.get("ensure") === "1" ||
+        searchParams.get("ensure") === "true";
       if (!districtName && !upazilaName && !mouzaName) {
         return NextResponse.json(
           { error: "district, upazila, or mouza is required" },
@@ -20,148 +25,19 @@ export async function GET(request: NextRequest) {
         );
       }
 
-      const { ilike, and } = await import("drizzle-orm");
-
-      let divisionId: string | null = null;
-      let divisionName: string | null = null;
-      let districtId: string | null = null;
-      let resolvedDistrictName: string | null = null;
-      let upazilaId: string | null = null;
-      let resolvedUpazilaName: string | null = null;
-      let unionId: string | null = null;
-      let mouzaId: string | null = null;
-      let resolvedMouzaName: string | null = null;
-      let jlNumber: string | null = null;
-
-      if (districtName) {
-        const [district] = await db
-          .select({
-            id: districts.id,
-            name: districts.name,
-            divisionId: districts.divisionId,
-            divisionName: divisions.name,
-          })
-          .from(districts)
-          .innerJoin(divisions, eq(districts.divisionId, divisions.id))
-          .where(ilike(districts.name, districtName))
-          .limit(1);
-        if (district) {
-          districtId = district.id;
-          resolvedDistrictName = district.name;
-          divisionId = district.divisionId;
-          divisionName = district.divisionName;
-        }
-      }
-
-      if (upazilaName) {
-        const upazilaConditions = [ilike(upazilas.name, upazilaName)];
-        if (districtId) {
-          upazilaConditions.push(eq(upazilas.districtId, districtId));
-        }
-        const [upazila] = await db
-          .select({
-            id: upazilas.id,
-            name: upazilas.name,
-            districtId: upazilas.districtId,
-          })
-          .from(upazilas)
-          .where(and(...upazilaConditions))
-          .limit(1);
-        if (upazila) {
-          upazilaId = upazila.id;
-          resolvedUpazilaName = upazila.name;
-          if (!districtId) {
-            districtId = upazila.districtId;
-            const [district] = await db
-              .select({
-                id: districts.id,
-                name: districts.name,
-                divisionId: districts.divisionId,
-                divisionName: divisions.name,
-              })
-              .from(districts)
-              .innerJoin(divisions, eq(districts.divisionId, divisions.id))
-              .where(eq(districts.id, upazila.districtId))
-              .limit(1);
-            if (district) {
-              resolvedDistrictName = district.name;
-              divisionId = district.divisionId;
-              divisionName = district.divisionName;
-            }
-          }
-        }
-      }
-
-      if (mouzaName) {
-        const mouzaConditions = [ilike(mouzas.name, mouzaName)];
-        if (upazilaId) {
-          mouzaConditions.push(eq(mouzas.upazilaId, upazilaId));
-        }
-        const [mouza] = await db
-          .select({
-            id: mouzas.id,
-            name: mouzas.name,
-            jlNumber: mouzas.jlNumber,
-            upazilaId: mouzas.upazilaId,
-            unionId: mouzas.unionId,
-          })
-          .from(mouzas)
-          .where(and(...mouzaConditions))
-          .limit(1);
-        if (mouza) {
-          mouzaId = mouza.id;
-          resolvedMouzaName = mouza.name;
-          jlNumber = mouza.jlNumber;
-          unionId = mouza.unionId;
-          if (!upazilaId && mouza.upazilaId) {
-            upazilaId = mouza.upazilaId;
-            const [upazila] = await db
-              .select({
-                id: upazilas.id,
-                name: upazilas.name,
-                districtId: upazilas.districtId,
-              })
-              .from(upazilas)
-              .where(eq(upazilas.id, mouza.upazilaId))
-              .limit(1);
-            if (upazila) {
-              resolvedUpazilaName = upazila.name;
-              if (!districtId) {
-                districtId = upazila.districtId;
-                const [district] = await db
-                  .select({
-                    id: districts.id,
-                    name: districts.name,
-                    divisionId: districts.divisionId,
-                    divisionName: divisions.name,
-                  })
-                  .from(districts)
-                  .innerJoin(divisions, eq(districts.divisionId, divisions.id))
-                  .where(eq(districts.id, upazila.districtId))
-                  .limit(1);
-                if (district) {
-                  resolvedDistrictName = district.name;
-                  divisionId = district.divisionId;
-                  divisionName = district.divisionName;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      return NextResponse.json({
-        divisionId,
-        divisionName,
-        districtId,
-        districtName: resolvedDistrictName,
-        upazilaId,
-        upazilaName: resolvedUpazilaName,
-        unionId,
-        mouzaId,
-        mouzaName: resolvedMouzaName,
+      const { resolveGeographyFromGisNames } = await import(
+        "@/lib/geography/resolve-from-gis"
+      );
+      const resolved = await resolveGeographyFromGisNames({
+        district: districtName,
+        upazila: upazilaName,
+        mouza: mouzaName,
         jlNumber,
+        mCode,
+        ensure,
       });
+
+      return NextResponse.json(resolved);
     }
     case "divisions": {
       const data = await db.select().from(divisions).orderBy(asc(divisions.name));

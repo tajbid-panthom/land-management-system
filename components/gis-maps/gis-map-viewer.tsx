@@ -10,7 +10,7 @@ import MapGL, {
   ScaleControl,
   type MapRef,
 } from "react-map-gl/maplibre";
-import type { FeatureCollection } from "geojson";
+import type { FeatureCollection, Geometry } from "geojson";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   BASEMAP_OPTIONS,
@@ -74,7 +74,24 @@ type GisMapViewerProps = {
     datasetId?: string;
     featureId?: string;
     mauza?: string;
+    /** Optional GeoJSON geometry to highlight the searched polygon. */
+    geometry?: Geometry | null;
+    layerId?: string;
   };
+  /**
+   * Embedded beside the public/parcel search panel.
+   * Hides admin map controls and uses public map APIs.
+   */
+  embedded?: boolean;
+  /** Logged-in users may see deed / mutation actions after search. */
+  isAuthenticated?: boolean;
+  /**
+   * When true, map clicks only show raw GIS attributes until the user
+   * has searched / selected a result (`searchActive`).
+   */
+  requireSearchForDetails?: boolean;
+  /** True after the user runs a search (or selects a search hit). */
+  searchActive?: boolean;
 };
 
 type MouzaSearchHit = {
@@ -141,7 +158,14 @@ export function GisMapViewer({
   mapId,
   className,
   focusPlot,
+  embedded = false,
+  isAuthenticated = false,
+  requireSearchForDetails = false,
+  searchActive = false,
 }: GisMapViewerProps) {
+  const allowPropertyDetails =
+    !requireSearchForDetails || searchActive;
+  const allowDocuments = allowPropertyDetails && isAuthenticated;
   const mapRef = useRef<MapRef>(null);
   const viewportCacheRef = useRef<Map<string, FeatureCollection>>(new Map());
   const loadGenerationRef = useRef(0);
@@ -177,7 +201,7 @@ export function GisMapViewer({
   const [mouzaDatasetId, setMouzaDatasetId] = useState(
     focusPlot?.datasetId ?? "",
   );
-  const [showMouzaLayer, setShowMouzaLayer] = useState(true);
+  const [showMouzaLayer, setShowMouzaLayer] = useState(() => !embedded);
   const [popup, setPopup] = useState<PopupState>(null);
   const [popupLoading, setPopupLoading] = useState(false);
   const [popupPosition, setPopupPosition] = useState<{
@@ -187,6 +211,8 @@ export function GisMapViewer({
   const [highlightPlot, setHighlightPlot] = useState<string | null>(
     focusPlot?.plotNo ?? null,
   );
+  const [highlightCollection, setHighlightCollection] =
+    useState<FeatureCollection | null>(null);
   const [datasets, setDatasets] = useState<Array<{ id: string; name: string }>>(
     [],
   );
@@ -413,7 +439,8 @@ export function GisMapViewer({
   }, []);
 
   useEffect(() => {
-    fetch("/api/maps")
+    const mapsUrl = embedded ? "/api/maps/public" : "/api/maps";
+    fetch(mapsUrl)
       .then((r) => r.json())
       .then((data) => {
         const list = (data.maps ?? []).map(
@@ -423,9 +450,11 @@ export function GisMapViewer({
           }),
         );
         setMaps(list);
-        setSelectedMapId((current) => current || list[0]?.id || "");
+        setSelectedMapId((current) => current || mapId || list[0]?.id || "");
       })
       .catch(() => undefined);
+
+    if (embedded) return;
 
     fetch("/api/mouza-gis/datasets")
       .then((r) => r.json())
@@ -442,7 +471,7 @@ export function GisMapViewer({
         );
       })
       .catch(() => undefined);
-  }, [focusPlot?.datasetId]);
+  }, [embedded, focusPlot?.datasetId, mapId]);
 
   useEffect(() => {
     if (!selectedMapId) {
@@ -456,7 +485,10 @@ export function GisMapViewer({
     resetLayerLoadLogs();
     viewportCacheRef.current.clear();
 
-    fetch(`/api/maps/layers?mapId=${selectedMapId}`)
+    const layersUrl = embedded
+      ? `/api/maps/public?mapId=${selectedMapId}`
+      : `/api/maps/layers?mapId=${selectedMapId}`;
+    fetch(layersUrl)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
@@ -483,7 +515,7 @@ export function GisMapViewer({
     return () => {
       cancelled = true;
     };
-  }, [selectedMapId]);
+  }, [selectedMapId, embedded]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -508,6 +540,31 @@ export function GisMapViewer({
         const detail = data.detail as MouzaDetail;
         setHighlightPlot(focusPlot.plotNo ?? null);
 
+        if (detail.geometry) {
+          const collection: FeatureCollection = {
+            type: "FeatureCollection",
+            features: [
+              {
+                type: "Feature",
+                properties: {
+                  plotNo: focusPlot.plotNo ?? null,
+                  mauza: focusPlot.mauza ?? null,
+                },
+                geometry: detail.geometry,
+              },
+            ],
+          };
+          setHighlightCollection(collection);
+          const polyBounds = computeBounds([collection]);
+          if (polyBounds && mapRef.current) {
+            mapRef.current.fitBounds(polyBounds, {
+              padding: 64,
+              duration: 1000,
+              maxZoom: 17,
+            });
+          }
+        }
+
         let anchor =
           detail.geometry != null
             ? getGeometryAnchor(detail.geometry)
@@ -526,11 +583,13 @@ export function GisMapViewer({
         }
         if (!anchor) return;
 
-        mapRef.current?.flyTo({
-          center: [anchor.lng, anchor.lat],
-          zoom: 16,
-          duration: 1000,
-        });
+        if (!detail.geometry) {
+          mapRef.current?.flyTo({
+            center: [anchor.lng, anchor.lat],
+            zoom: 16,
+            duration: 1000,
+          });
+        }
         setPopup({ kind: "mouza", detail, anchor });
       })
       .catch(() => undefined);
@@ -550,12 +609,84 @@ export function GisMapViewer({
     if (focusPlot.plotNo) params.set("plotNo", focusPlot.plotNo);
     if (focusPlot.mauza) params.set("mauza", focusPlot.mauza);
 
+    // Ensure the layer that owns this feature is visible so the plot polygon appears.
+    if (focusPlot.layerId) {
+      setLayers((prev) =>
+        prev.map((layer) =>
+          layer.id === focusPlot.layerId
+            ? { ...layer, visible: true }
+            : layer,
+        ),
+      );
+    }
+
+    const applyHighlightGeometry = (geometry: Geometry | null | undefined) => {
+      if (!geometry || cancelled) return;
+      const collection: FeatureCollection = {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: focusPlot.featureId ?? undefined,
+            properties: {
+              plotNo: focusPlot.plotNo ?? null,
+              mauza: focusPlot.mauza ?? null,
+            },
+            geometry,
+          },
+        ],
+      };
+      setHighlightCollection(collection);
+      setHighlightPlot(focusPlot.plotNo ?? null);
+
+      const bounds = computeBounds([collection]);
+      if (bounds && mapRef.current) {
+        mapRef.current.fitBounds(bounds, {
+          padding: 64,
+          duration: 1000,
+          maxZoom: 17,
+        });
+      }
+    };
+
+    let geometryApplied = Boolean(focusPlot.geometry);
+    if (focusPlot.geometry) {
+      applyHighlightGeometry(focusPlot.geometry);
+    }
+
     fetch(`/api/maps/resolve-property?${params}`)
       .then((r) => r.json())
-      .then((data) => {
+      .then(async (data) => {
         if (cancelled || !data.detail) return;
         const detail = data.detail as MouzaDetail;
         setHighlightPlot(detail.plotNo ?? focusPlot.plotNo ?? null);
+
+        // Load polygon geometry for highlight if not already provided.
+        if (!focusPlot.geometry && focusPlot.featureId) {
+          try {
+            const featureRes = await fetch(
+              `/api/maps/features/${focusPlot.featureId}`,
+            );
+            if (featureRes.ok) {
+              const featureData = await featureRes.json();
+              if (featureData.geometry) {
+                applyHighlightGeometry(featureData.geometry as Geometry);
+                geometryApplied = true;
+                if (featureData.layerId) {
+                  setLayers((prev) =>
+                    prev.map((layer) =>
+                      layer.id === featureData.layerId
+                        ? { ...layer, visible: true }
+                        : layer,
+                    ),
+                  );
+                }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
 
         let anchor: { lng: number; lat: number } | null = null;
         if (data.anchor?.lng != null && data.anchor?.lat != null) {
@@ -571,13 +702,19 @@ export function GisMapViewer({
             };
           }
         }
+        if (!anchor && focusPlot.geometry) {
+          anchor = getGeometryAnchor(focusPlot.geometry);
+        }
         if (!anchor) return;
 
-        mapRef.current?.flyTo({
-          center: [anchor.lng, anchor.lat],
-          zoom: 16,
-          duration: 1000,
-        });
+        // fitBounds already ran when geometry was applied; only fly if no polygon.
+        if (!geometryApplied) {
+          mapRef.current?.flyTo({
+            center: [anchor.lng, anchor.lat],
+            zoom: 16,
+            duration: 1000,
+          });
+        }
         setPopup({ kind: "mouza", detail, anchor });
       })
       .catch(() => undefined);
@@ -590,7 +727,16 @@ export function GisMapViewer({
     focusPlot?.featureId,
     focusPlot?.plotNo,
     focusPlot?.mauza,
+    focusPlot?.geometry,
+    focusPlot?.layerId,
   ]);
+
+  // Clear highlight when focus is cleared.
+  useEffect(() => {
+    if (!focusPlot?.featureId && !focusPlot?.plotNo) {
+      setHighlightCollection(null);
+    }
+  }, [focusPlot?.featureId, focusPlot?.plotNo]);
 
   const fitToData = useCallback(
     (data: Record<string, FeatureCollection>, visibleOnly = true) => {
@@ -746,6 +892,7 @@ export function GisMapViewer({
     setPopup(null);
     setPopupLoading(false);
     setHighlightPlot(null);
+    setHighlightCollection(null);
     setPdfViewer(null);
   }, []);
 
@@ -892,6 +1039,25 @@ export function GisMapViewer({
         featureId: props.recordId ?? null,
       };
 
+      // Browse-without-search: only show the light GIS-style summary.
+      if (!allowPropertyDetails) {
+        setPopup({
+          kind: "gis",
+          layerName: "Mouza plot",
+          geometryType: feature.geometry.type,
+          properties: {
+            Plot_No: props.plotNo,
+            Mauza: props.mauza,
+            Jl_No: props.jlNo,
+            M_District: props.mDistrict,
+            M_Upazila: props.mUpazila,
+          },
+          featureId: props.recordId,
+          anchor,
+        });
+        return;
+      }
+
       const mouzaId = props.mouzaId as string | undefined;
       if (mouzaId) {
         void loadMouzaDetail(mouzaId, props.plotNo ?? null, anchor, fallback);
@@ -928,6 +1094,12 @@ export function GisMapViewer({
       featureId,
       anchor,
     });
+
+    // Browse mode (no search yet): keep raw GIS attributes only.
+    if (!allowPropertyDetails) {
+      setPopupLoading(false);
+      return;
+    }
 
     void fetch("/api/maps/resolve-property", {
       method: "POST",
@@ -1000,35 +1172,49 @@ export function GisMapViewer({
   const popupSections = useMemo(() => {
     if (!popup) return [];
     if (popup.kind === "mouza") {
-      return buildMouzaPopupSections(popup.detail);
+      return buildMouzaPopupSections(popup.detail, {
+        includeSensitive: allowDocuments,
+      });
     }
     return buildGisLayerPopupSections({
       layerName: popup.layerName,
       geometryType: popup.geometryType,
       properties: popup.properties,
       featureId: popup.featureId,
-      coordinates: formatCoordinates(popup.anchor.lat, popup.anchor.lng),
+      coordinates: formatCoordinates(popup.anchor.lng, popup.anchor.lat),
     });
-  }, [popup]);
+  }, [allowDocuments, popup]);
 
   const documentActions = useMemo(() => {
+    if (!allowDocuments) return [];
     if (!popup || popup.kind !== "mouza") return [];
     return buildPropertyDocumentActions(popup.detail);
-  }, [popup]);
+  }, [allowDocuments, popup]);
 
   const propertyLinks = useMemo(() => {
     if (!popup) return [];
+    // Public browse / guest: no create/open-property admin actions.
+    if (embedded && !allowDocuments) return [];
+    if (!allowPropertyDetails && popup.kind === "gis") return [];
     if (popup.kind === "mouza") {
       return buildPropertyPopupLinks(popup.detail, {
         mapId: selectedMapId || null,
       });
     }
+    if (!isAuthenticated) return [];
     return buildPropertyPopupLinks(null, {
       mapId: selectedMapId || null,
       gisProperties: popup.properties,
       featureId: popup.featureId,
     });
-  }, [popup, selectedMapId]);
+  }, [
+    allowDocuments,
+    allowPropertyDetails,
+    embedded,
+    isAuthenticated,
+    popup,
+    selectedMapId,
+  ]);
 
   const popupTitle = useMemo(() => {
     if (!popup) return "Feature Details";
@@ -1058,8 +1244,90 @@ export function GisMapViewer({
     popupPosition != null ? popupPosition.popup.x + 320 + 16 : undefined;
   const pdfPreferredTop = popupPosition?.popup.y;
 
+  const legendItems = useMemo(() => {
+    const items = layers
+      .filter((l) => l.visible)
+      .map((l, index) => {
+        const style = buildLayerStyle(l.geometryType, index, l.styleJson);
+        const paint = (style.paint ?? {}) as Record<string, string>;
+        const color =
+          paint["fill-color"] ?? paint["line-color"] ?? "#2563eb";
+        return {
+          id: l.id,
+          name: l.layerName,
+          color,
+          kind: getLayerRenderKind(l.geometryType),
+        };
+      });
+
+    if (showMouzaLayer && mouzaGeojson?.features?.length) {
+      items.push({
+        id: "mouza-sync",
+        name: "Mouza sync plots",
+        color: "#0d9488",
+        kind: "fill" as const,
+      });
+    }
+
+    if (highlightCollection?.features?.length) {
+      items.unshift({
+        id: "search-highlight",
+        name: highlightPlot
+          ? `Selected plot ${highlightPlot}`
+          : "Selected plot",
+        color: "#f59e0b",
+        kind: "fill" as const,
+      });
+    }
+
+    return items;
+  }, [
+    highlightCollection?.features?.length,
+    highlightPlot,
+    layers,
+    mouzaGeojson?.features?.length,
+    showMouzaLayer,
+  ]);
+
+  const legendPanel = (
+    <div className="max-h-48 overflow-y-auto rounded-lg border border-sky-200 bg-white/95 p-2.5 shadow-md backdrop-blur-sm">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        Legend
+      </p>
+      {legendItems.length === 0 ? (
+        <p className="text-[11px] text-slate-400">No visible layers</p>
+      ) : (
+        <ul className="space-y-1.5 text-xs text-slate-700">
+          {legendItems.map((item) => (
+            <li key={item.id} className="flex items-center gap-2">
+              <span
+                className={`inline-block shrink-0 ${
+                  item.kind === "line"
+                    ? "h-0.5 w-4"
+                    : item.kind === "circle"
+                      ? "h-2.5 w-2.5 rounded-full"
+                      : "h-3 w-3 rounded-sm"
+                }`}
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="truncate">{item.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
   return (
-    <div className={className ?? "grid gap-4 lg:grid-cols-3"}>
+    <div
+      className={
+        className ??
+        (embedded
+          ? "flex h-full min-h-[520px] flex-col"
+          : "grid gap-4 lg:grid-cols-3")
+      }
+    >
+      {!embedded ? (
       <aside className="space-y-4 rounded-lg border border-sky-200 bg-white p-4 lg:col-span-1">
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase text-slate-500">
@@ -1303,42 +1571,25 @@ export function GisMapViewer({
           )}
         </div>
 
-        <div className="border-t border-sky-100 pt-3">
-          <p className="mb-2 text-xs font-semibold uppercase text-slate-500">
-            Legend
-          </p>
-          <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-slate-600">
-            {layers
-              .filter((l) => l.visible)
-              .map((l, index) => {
-                const style = buildLayerStyle(
-                  l.geometryType,
-                  index,
-                  l.styleJson,
-                );
-                const paint = (style.paint ?? {}) as Record<string, string>;
-                const color =
-                  paint["fill-color"] ?? paint["line-color"] ?? "#2563eb";
-
-                return (
-                  <li key={l.id} className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 shrink-0 rounded-sm"
-                      style={{ backgroundColor: color }}
-                    />
-                    <span className="truncate">{l.layerName}</span>
-                  </li>
-                );
-              })}
-          </ul>
-        </div>
+        <div className="border-t border-sky-100 pt-3">{legendPanel}</div>
       </aside>
+      ) : null}
 
-      <div className="relative overflow-hidden rounded-lg border border-sky-200 lg:col-span-2">
+      <div
+        className={
+          embedded
+            ? "relative min-h-[520px] flex-1 overflow-hidden rounded-lg border border-sky-200"
+            : "relative overflow-hidden rounded-lg border border-sky-200 lg:col-span-2"
+        }
+      >
         <MapGL
           ref={mapRef}
           initialViewState={DEFAULT_VIEW}
-          style={{ width: "100%", height: "min(70vh, 680px)" }}
+          style={{
+            width: "100%",
+            height: embedded ? "100%" : "min(70vh, 680px)",
+            minHeight: embedded ? 520 : undefined,
+          }}
           mapStyle={mapStyle}
           interactiveLayerIds={interactiveLayerIds}
           onClick={onMapClick}
@@ -1459,6 +1710,33 @@ export function GisMapViewer({
               />
             </Source>
           ) : null}
+
+          {highlightCollection?.features?.length ? (
+            <Source
+              id="search-highlight"
+              type="geojson"
+              data={highlightCollection}
+            >
+              <Layer
+                id="search-highlight-fill"
+                type="fill"
+                filter={POLYGON_GEOMETRY_FILTER}
+                paint={{
+                  "fill-color": "#f59e0b",
+                  "fill-opacity": 0.55,
+                }}
+              />
+              <Layer
+                id="search-highlight-outline"
+                type="line"
+                paint={{
+                  "line-color": "#b45309",
+                  "line-width": 3.5,
+                  "line-opacity": 1,
+                }}
+              />
+            </Source>
+          ) : null}
         </MapGL>
 
         {(loadingCount > 0 || mouzaStatus === "loading") && (
@@ -1481,6 +1759,12 @@ export function GisMapViewer({
         >
           Fit to layers
         </button>
+
+        {embedded ? (
+          <div className="pointer-events-auto absolute bottom-10 left-2 z-10 w-[min(220px,calc(100%-1rem))]">
+            {legendPanel}
+          </div>
+        ) : null}
 
         <MapFeaturePopup
           open={popup != null}
@@ -1511,8 +1795,13 @@ export function GisMapViewer({
       </div>
       {popup == null && (
         <p className="text-xs text-slate-500 lg:col-span-3">
-          Basemap loads first; plot layers stream in for the visible viewport as
-          you pan and zoom. Click a plot to view documents.
+          {embedded
+            ? requireSearchForDetails && !searchActive
+              ? "Browse the map freely. Search for a parcel to reveal plot details; sign in to view deeds and mutation certificates."
+              : allowDocuments
+                ? "Select a search result or plot to view registration deed and mutation documents."
+                : "Plot details are shown from your search. Sign in to view deeds and mutation certificates."
+            : "Basemap loads first; plot layers stream in for the visible viewport as you pan and zoom. Click a plot to view documents."}
         </p>
       )}
     </div>

@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { getSession } from "@/lib/auth/session";
 import {
   getGisLayerFeatureCentroid,
   resolvePropertyDetailFromGisAttributes,
 } from "@/lib/gis-maps/resolve-property";
 import { getFeatureById } from "@/lib/gis-maps/queries";
-import { formatCoordinates } from "@/lib/gis-maps/feature-popup";
+import {
+  formatCoordinates,
+  type MouzaPopupDetail,
+} from "@/lib/gis-maps/feature-popup";
 
 const bodySchema = z.object({
   properties: z.record(z.string(), z.unknown()),
@@ -13,6 +17,27 @@ const bodySchema = z.object({
   coordinates: z.string().nullable().optional(),
   layerName: z.string().nullable().optional(),
 });
+
+/** Strip deed/mutation PDFs and registration numbers for anonymous users. */
+function redactSensitiveDetail(
+  detail: MouzaPopupDetail | null,
+  allowDocuments: boolean,
+): MouzaPopupDetail | null {
+  if (!detail || allowDocuments) return detail;
+  return {
+    ...detail,
+    registeredDeedNumber: null,
+    registrationDate: null,
+    mutationStatus: null,
+    courtCaseStatus: null,
+    registrationDeed: null,
+    mutationCertificate: null,
+    currentOwners: null,
+    ownershipStatus: null,
+    ownerCount: null,
+    khatianNumbers: null,
+  };
+}
 
 export async function POST(request: Request) {
   let json: unknown;
@@ -30,8 +55,13 @@ export async function POST(request: Request) {
     );
   }
 
+  const session = await getSession();
+  const allowDocuments = Boolean(session?.user?.id);
   const detail = await resolvePropertyDetailFromGisAttributes(parsed.data);
-  return NextResponse.json({ detail });
+  return NextResponse.json({
+    detail: redactSensitiveDetail(detail, allowDocuments),
+    authenticated: allowDocuments,
+  });
 }
 
 export async function GET(request: Request) {
@@ -54,6 +84,8 @@ export async function GET(request: Request) {
     ? formatCoordinates(anchor.lng, anchor.lat)
     : null;
 
+  const session = await getSession();
+  const allowDocuments = Boolean(session?.user?.id);
   const detail = await resolvePropertyDetailFromGisAttributes({
     properties: feature.properties ?? {},
     featureId,
@@ -61,5 +93,9 @@ export async function GET(request: Request) {
     layerName: feature.layer_name ?? null,
   });
 
-  return NextResponse.json({ detail, anchor });
+  return NextResponse.json({
+    detail: redactSensitiveDetail(detail, allowDocuments),
+    anchor,
+    authenticated: allowDocuments,
+  });
 }

@@ -15,6 +15,8 @@ export function buildPropertyCreateHref(input: {
   upazila?: string | null;
   mCode?: string | null;
   mAcres?: string | null;
+  shapeArea?: string | null;
+  khasArea?: string | null;
   revenueNo?: string | null;
   landType?: string | null;
   featureId?: string | null;
@@ -29,6 +31,10 @@ export function buildPropertyCreateHref(input: {
   if (input.mCode) params.set("mCode", input.mCode);
   if (input.mAcres) {
     params.set("areaValue", input.mAcres);
+    params.set("areaUnit", "acre");
+  } else if (input.shapeArea) {
+    // Fallback so create form is not left with an empty required area.
+    params.set("areaValue", input.shapeArea);
     params.set("areaUnit", "acre");
   }
   if (input.revenueNo) params.set("revenueNo", input.revenueNo);
@@ -53,7 +59,9 @@ export function buildPropertyCreateHrefFromDetail(
     district: detail.mDistrict,
     upazila: detail.mUpazila,
     mCode: detail.mCode,
-    mAcres: detail.mAcres,
+    mAcres: detail.mAcres ?? detail.khasArea,
+    shapeArea: detail.shapeArea,
+    khasArea: detail.khasArea,
     revenueNo: detail.revenueNo,
     landType: detail.landType,
     featureId: detail.featureId ?? detail.id,
@@ -73,7 +81,9 @@ export function buildPropertyCreateHrefFromGisProperties(
     district: keys.district,
     upazila: keys.upazila,
     mCode: keys.mCode,
-    mAcres: keys.mAcres,
+    mAcres: keys.mAcres ?? keys.khasArea,
+    shapeArea: keys.shapeArea,
+    khasArea: keys.khasArea,
     revenueNo: keys.revenueNo,
     landType: keys.landType,
     featureId: extras?.featureId,
