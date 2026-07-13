@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
+import { canViewDocumentAudit } from "@/lib/properties/document-auth";
 import {
   getGisLayerFeatureCentroid,
   resolvePropertyDetailFromGisAttributes,
@@ -18,7 +19,7 @@ const bodySchema = z.object({
   layerName: z.string().nullable().optional(),
 });
 
-/** Strip deed/mutation PDFs and registration numbers for anonymous users. */
+/** Strip deed/mutation PDFs and registration numbers for non-admin users. */
 function redactSensitiveDetail(
   detail: MouzaPopupDetail | null,
   allowDocuments: boolean,
@@ -39,6 +40,13 @@ function redactSensitiveDetail(
   };
 }
 
+async function sessionAllowsDocuments() {
+  const session = await getSession();
+  return Boolean(
+    session?.user?.id && canViewDocumentAudit(session.user.role),
+  );
+}
+
 export async function POST(request: Request) {
   let json: unknown;
   try {
@@ -55,8 +63,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const session = await getSession();
-  const allowDocuments = Boolean(session?.user?.id);
+  const allowDocuments = await sessionAllowsDocuments();
   const detail = await resolvePropertyDetailFromGisAttributes(parsed.data);
   return NextResponse.json({
     detail: redactSensitiveDetail(detail, allowDocuments),
@@ -84,8 +91,7 @@ export async function GET(request: Request) {
     ? formatCoordinates(anchor.lng, anchor.lat)
     : null;
 
-  const session = await getSession();
-  const allowDocuments = Boolean(session?.user?.id);
+  const allowDocuments = await sessionAllowsDocuments();
   const detail = await resolvePropertyDetailFromGisAttributes({
     properties: feature.properties ?? {},
     featureId,

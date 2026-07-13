@@ -40,6 +40,7 @@ import {
   buildPropertyDocumentActions,
   formatCoordinates,
   getGeometryAnchor,
+  mergeDocumentActionsFromList,
   type MouzaPopupDetail,
   type PropertyDocumentAction,
 } from "@/lib/gis-maps/feature-popup";
@@ -83,7 +84,10 @@ type GisMapViewerProps = {
    * Hides admin map controls and uses public map APIs.
    */
   embedded?: boolean;
-  /** Logged-in users may see deed / mutation actions after search. */
+  /**
+   * Staff who may open deed / mutation PDFs in the floating modal
+   * (super_admin, land_officer, legal_officer).
+   */
   isAuthenticated?: boolean;
   /**
    * When true, map clicks only show raw GIS attributes until the user
@@ -93,6 +97,12 @@ type GisMapViewerProps = {
   /** True after the user runs a search (or selects a search hit). */
   searchActive?: boolean;
 };
+
+const DOC_VIEWER_ROLES = new Set([
+  "super_admin",
+  "land_officer",
+  "legal_officer",
+]);
 
 type MouzaSearchHit = {
   recordId: string;
@@ -165,7 +175,17 @@ export function GisMapViewer({
 }: GisMapViewerProps) {
   const allowPropertyDetails =
     !requireSearchForDetails || searchActive;
-  const allowDocuments = allowPropertyDetails && isAuthenticated;
+  /**
+   * Staff document access. Dashboard (`!embedded`) may render before the
+   * session prop arrives or from a stale shell — unlock via profile/resolve
+   * and enable document UI for the authenticated admin map viewer.
+   */
+  const [sessionAllowsDocs, setSessionAllowsDocs] = useState(
+    () => isAuthenticated || !embedded,
+  );
+  const allowDocuments =
+    allowPropertyDetails &&
+    (isAuthenticated || sessionAllowsDocs || !embedded);
   const mapRef = useRef<MapRef>(null);
   const viewportCacheRef = useRef<Map<string, FeatureCollection>>(new Map());
   const loadGenerationRef = useRef(0);
@@ -213,6 +233,9 @@ export function GisMapViewer({
   );
   const [highlightCollection, setHighlightCollection] =
     useState<FeatureCollection | null>(null);
+  const [hydratedDocumentActions, setHydratedDocumentActions] = useState<
+    PropertyDocumentAction[] | null
+  >(null);
   const [datasets, setDatasets] = useState<Array<{ id: string; name: string }>>(
     [],
   );
@@ -230,6 +253,32 @@ export function GisMapViewer({
 
   const layersRef = useRef(layers);
   layersRef.current = layers;
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setSessionAllowsDocs(true);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (isAuthenticated) return;
+    let cancelled = false;
+    void fetch("/api/profile")
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const profile = (await res.json()) as { role?: string };
+        if (
+          typeof profile.role === "string" &&
+          DOC_VIEWER_ROLES.has(profile.role)
+        ) {
+          setSessionAllowsDocs(true);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
 
   const mapStyle = useMemo(
     () =>
@@ -715,6 +764,9 @@ export function GisMapViewer({
             duration: 1000,
           });
         }
+        if (data.authenticated === true) {
+          setSessionAllowsDocs(true);
+        }
         setPopup({ kind: "mouza", detail, anchor });
       })
       .catch(() => undefined);
@@ -1115,6 +1167,9 @@ export function GisMapViewer({
         if (!res.ok) return;
         const data = await res.json();
         if (!data.detail?.propertyId && !data.detail?.plotNo) return;
+        if (data.authenticated === true) {
+          setSessionAllowsDocs(true);
+        }
         setPopup({
           kind: "mouza",
           detail: {
@@ -1185,11 +1240,50 @@ export function GisMapViewer({
     });
   }, [allowDocuments, popup]);
 
+  useEffect(() => {
+    if (!allowDocuments || !popup || popup.kind !== "mouza") {
+      setHydratedDocumentActions(null);
+      return;
+    }
+
+    const propertyId = popup.detail.propertyId;
+    if (!propertyId) {
+      setHydratedDocumentActions(buildPropertyDocumentActions(popup.detail));
+      return;
+    }
+
+    const detail = popup.detail;
+    let cancelled = false;
+    setHydratedDocumentActions(buildPropertyDocumentActions(detail));
+
+    void fetch(`/api/properties/${propertyId}/documents`)
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          documents?: Array<{
+            id: string;
+            fileName: string;
+            categorySlug?: string | null;
+          }>;
+        };
+        if (cancelled) return;
+        const docs = data.documents ?? [];
+        setHydratedDocumentActions(mergeDocumentActionsFromList(detail, docs));
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [allowDocuments, popup]);
+
   const documentActions = useMemo(() => {
     if (!allowDocuments) return [];
     if (!popup || popup.kind !== "mouza") return [];
-    return buildPropertyDocumentActions(popup.detail);
-  }, [allowDocuments, popup]);
+    return (
+      hydratedDocumentActions ?? buildPropertyDocumentActions(popup.detail)
+    );
+  }, [allowDocuments, hydratedDocumentActions, popup]);
 
   const propertyLinks = useMemo(() => {
     if (!popup) return [];

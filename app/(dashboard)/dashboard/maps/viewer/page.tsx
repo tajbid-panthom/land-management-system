@@ -1,6 +1,11 @@
 import { PageHeader } from "@/components/ui/page-header";
 import { GisSubnav } from "@/components/gis-maps/gis-subnav";
 import { GisMapViewer } from "@/components/gis-maps/gis-map-viewer";
+import { getSession } from "@/lib/auth/session";
+import { canViewDocumentAudit } from "@/lib/properties/document-auth";
+
+/** Session-dependent props — never serve a cached shell without auth flags. */
+export const dynamic = "force-dynamic";
 
 export default async function GisViewerPage({
   searchParams,
@@ -14,6 +19,11 @@ export default async function GisViewerPage({
     mauza?: string;
   }>;
 }) {
+  const session = await getSession();
+  const canViewDocuments = Boolean(
+    session?.user?.id && canViewDocumentAudit(session.user.role),
+  );
+
   const { mapId, mouzaId, plotNo, datasetId, featureId, mauza } =
     await searchParams;
 
@@ -26,6 +36,7 @@ export default async function GisViewerPage({
       <GisSubnav />
       <GisMapViewer
         mapId={mapId}
+        isAuthenticated={canViewDocuments}
         focusPlot={
           mouzaId || plotNo || datasetId || featureId
             ? { mouzaId, plotNo, datasetId, featureId, mauza }

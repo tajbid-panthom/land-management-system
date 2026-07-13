@@ -16,8 +16,11 @@ type FocusPlot = {
 
 export function SearchWithGisMap({
   isAuthenticated,
+  canViewDocuments = false,
 }: {
   isAuthenticated: boolean;
+  /** Super admin / staff who may open deeds & mutation in the map modal. */
+  canViewDocuments?: boolean;
 }) {
   const [searchActive, setSearchActive] = useState(false);
   const [focusPlot, setFocusPlot] = useState<FocusPlot | null>(null);
@@ -32,12 +35,12 @@ export function SearchWithGisMap({
     }
     setStatus(
       `${results.length} parcel${results.length === 1 ? "" : "s"} found. Select a row to zoom the map${
-        isAuthenticated
+        canViewDocuments
           ? " and open deed / mutation documents when available."
-          : ". Sign in to view deeds and mutation certificates."
+          : ". Sign in as an admin to view deeds and mutation certificates."
       }`,
     );
-  }, [isAuthenticated]);
+  }, [canViewDocuments]);
 
   const handleSelect = useCallback(
     async (parcel: ParcelSearchResult) => {
@@ -64,9 +67,9 @@ export function SearchWithGisMap({
             layerId: data.match.layerId ?? undefined,
           });
           setStatus(
-            isAuthenticated
+            canViewDocuments
               ? `Showing plot ${parcel.plotNumber} on the map.`
-              : `Showing plot ${parcel.plotNumber}. Sign in to view deeds and mutation certificates.`,
+              : `Showing plot ${parcel.plotNumber}. Sign in as an admin to view deeds and mutation certificates.`,
           );
           return;
         }
@@ -81,9 +84,9 @@ export function SearchWithGisMap({
           mauza: parcel.mouzaName,
         });
         setStatus(
-          isAuthenticated
+          canViewDocuments
             ? `Showing plot ${parcel.plotNumber}. Deed and mutation open from the map popup when uploaded.`
-            : `Showing plot ${parcel.plotNumber}. Sign in to view deeds and mutation certificates.`,
+            : `Showing plot ${parcel.plotNumber}. Sign in as an admin to view deeds and mutation certificates.`,
         );
         return;
       }
@@ -92,7 +95,7 @@ export function SearchWithGisMap({
         `Plot ${parcel.plotNumber} was found in search, but no GIS geometry match was located. Pan the map or refine the search.`,
       );
     },
-    [isAuthenticated],
+    [canViewDocuments],
   );
 
   return (
@@ -119,14 +122,23 @@ export function SearchWithGisMap({
             {status}
           </p>
         ) : null}
-        {!isAuthenticated ? (
+        {!canViewDocuments ? (
           <p className="text-xs text-slate-500">
-            You are browsing as a guest.{" "}
-            <a href="/login" className="font-medium text-teal-700 hover:underline">
-              Log in
-            </a>{" "}
-            to open registration deeds and mutation certificates for matched
-            properties.
+            {isAuthenticated
+              ? "Your account can browse plots on the map. Super admin / land / legal officers can open registration deeds and mutation certificates from the floating modal."
+              : (
+                <>
+                  You are browsing as a guest.{" "}
+                  <a
+                    href="/login"
+                    className="font-medium text-teal-700 hover:underline"
+                  >
+                    Log in
+                  </a>{" "}
+                  as an admin to open registration deeds and mutation
+                  certificates for matched properties.
+                </>
+              )}
           </p>
         ) : null}
       </div>
@@ -134,7 +146,7 @@ export function SearchWithGisMap({
       <div className="min-h-[560px] lg:col-span-7">
         <GisMapViewer
           embedded
-          isAuthenticated={isAuthenticated}
+          isAuthenticated={canViewDocuments}
           requireSearchForDetails
           searchActive={searchActive}
           focusPlot={focusPlot ?? undefined}

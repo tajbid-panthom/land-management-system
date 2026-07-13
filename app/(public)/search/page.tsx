@@ -2,10 +2,15 @@ import { Suspense } from "react";
 import { SiteHeader } from "@/components/layout/site-header";
 import { SearchWithGisMap } from "@/components/search/search-with-gis-map";
 import { getSession } from "@/lib/auth/session";
+import { canViewDocumentAudit } from "@/lib/properties/document-auth";
 
 export default async function SearchPage() {
   const session = await getSession();
   const isAuthenticated = Boolean(session?.user?.id);
+  // Super admin, land officer, and legal officer can open deeds & mutation PDFs.
+  const canViewDocuments = Boolean(
+    session?.user?.id && canViewDocumentAudit(session.user.role),
+  );
 
   return (
     <>
@@ -18,7 +23,8 @@ export default async function SearchPage() {
           <p className="mt-2 max-w-3xl text-sm text-slate-600">
             Search beside the map. Until you search, the map stays browse-only.
             After a match, select a plot to focus it. Registration deeds and
-            mutation certificates appear only when you are signed in.
+            mutation certificates appear for signed-in admins (including super
+            admin).
           </p>
         </div>
         <Suspense
@@ -28,7 +34,10 @@ export default async function SearchPage() {
             </div>
           }
         >
-          <SearchWithGisMap isAuthenticated={isAuthenticated} />
+          <SearchWithGisMap
+            isAuthenticated={isAuthenticated}
+            canViewDocuments={canViewDocuments}
+          />
         </Suspense>
       </main>
     </>

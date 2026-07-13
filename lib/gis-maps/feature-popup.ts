@@ -199,6 +199,37 @@ export function buildPropertyDocumentActions(
   ];
 }
 
+/** Merge resolve-property actions with live property document rows (source of truth). */
+export function mergeDocumentActionsFromList(
+  detail: MouzaPopupDetail,
+  docs: Array<{
+    id: string;
+    fileName: string;
+    categorySlug?: string | null;
+  }>,
+): PropertyDocumentAction[] {
+  const deed = docs.find((d) => d.categorySlug === "deed_copy");
+  const mutation = docs.find((d) => d.categorySlug === "mutation_certificate");
+
+  return buildPropertyDocumentActions({
+    ...detail,
+    registrationDeed: deed
+      ? {
+          id: deed.id,
+          fileName: deed.fileName,
+          mimeType: detail.registrationDeed?.mimeType ?? "application/pdf",
+        }
+      : detail.registrationDeed,
+    mutationCertificate: mutation
+      ? {
+          id: mutation.id,
+          fileName: mutation.fileName,
+          mimeType: detail.mutationCertificate?.mimeType ?? "application/pdf",
+        }
+      : detail.mutationCertificate,
+  });
+}
+
 export function buildGisLayerPopupSections(input: {
   layerName: string;
   geometryType: string;
