@@ -2,10 +2,8 @@
 
 import { signIn } from "next-auth/react";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 export default function LoginForm() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -28,8 +26,9 @@ export default function LoginForm() {
       return;
     }
 
-    router.push("/dashboard/parcels");
-    router.refresh();
+    // Full-page navigation so the new session cookie is applied and no
+    // stale client-side router cache redirects back to /login.
+    window.location.assign("/dashboard/parcels");
   }
 
   return (
